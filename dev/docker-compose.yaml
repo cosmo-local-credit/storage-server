@@ -1,0 +1,11 @@
+services:
+  storage-server:
+    image: storage-server:latest
+    restart: unless-stopped
+    environment:
+      - DEV=true
+      - STORAGE_S3__ENDPOINT=
+      - STORAGE_S3__ACCESS_KEY_ID=
+      - STORAGE_S3__SECRET_ACCESS_KEY=
+    ports:
+      - 127.0.0.1:5003:5003

@@ -1,0 +1,13 @@
+[metrics]
+enable = true
+
+[api]
+address = ":5003"
+max_body_size = 5
+origin = ["https://sarafu.network", "http://localhost:3001"]
+
+[s3]
+endpoint = ""
+access_key_id = ""
+secret_access_key = ""
+bucket_name = "sarafu-network"
