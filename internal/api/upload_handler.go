@@ -50,7 +50,7 @@ func (u *uploadHandler) upload(w http.ResponseWriter, r bunrouter.Request) error
 		return err
 	}
 
-	if kind.Extension == "jpg" || kind.Extension == "png" || kind.Extension == "pdf" {
+	if kind.Extension == "jpg" || kind.Extension == "png" || kind.Extension == "pdf" || kind.Extension == "webp" {
 		newFileID := strings.Replace(uuid.NewString(), "-", "", -1)
 		filePath := fmt.Sprintf("%s.%s", newFileID, kind.Extension)
 
