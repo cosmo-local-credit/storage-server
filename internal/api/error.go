@@ -25,8 +25,9 @@ type (
 )
 
 var (
-	ErrFormFolderKeyNotFound = errors.New("form folder key not found")
-	ErrNotImageFile          = errors.New("uploaded file is not an image")
+	ErrFormFolderKeyNotFound   = errors.New("form folder key not found")
+	ErrFormFileNameKeyNotFound = errors.New("form file name key not found")
+	ErrNotImageFile            = errors.New("uploaded file is not an image")
 )
 
 func (e *httpError) HTTPStatusCode() int {

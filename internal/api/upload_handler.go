@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
-	"github.com/google/uuid"
 	"github.com/grassrootseconomics/storage-server/internal/storage"
 	"github.com/h2non/filetype"
 	"github.com/uptrace/bunrouter"
@@ -41,6 +39,11 @@ func (u *uploadHandler) upload(w http.ResponseWriter, r bunrouter.Request) error
 		return ErrFormFolderKeyNotFound
 	}
 
+	fileName := r.FormValue("name")
+	if fileName == "" {
+		return ErrFormFolderKeyNotFound
+	}
+
 	var buffer bytes.Buffer
 	if _, err := io.Copy(&buffer, file); err != nil {
 		return err
@@ -51,8 +54,8 @@ func (u *uploadHandler) upload(w http.ResponseWriter, r bunrouter.Request) error
 	}
 
 	if kind.Extension == "jpg" || kind.Extension == "png" || kind.Extension == "pdf" || kind.Extension == "webp" {
-		newFileID := strings.Replace(uuid.NewString(), "-", "", -1)
-		filePath := fmt.Sprintf("%s.%s", newFileID, kind.Extension)
+		// newFileID := strings.Replace(uuid.NewString(), "-", "", -1)
+		filePath := fmt.Sprintf("%s.%s", fileName, kind.Extension)
 
 		if err := u.storage.Upload(
 			ctx,
