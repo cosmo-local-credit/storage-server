@@ -10,13 +10,12 @@ import (
 
 	"github.com/disintegration/imaging"
 	"github.com/gen2brain/webp"
-	"github.com/h2non/filetype"
 	xwebp "golang.org/x/image/webp"
 )
 
 type (
-	// Info describes an upload's container and pixel dimensions as they appear on
-	// the wire, before any EXIF orientation is applied.
+	// Info is an upload's container and dimensions as they appear on the wire,
+	// before EXIF orientation is applied.
 	Info struct {
 		Format string
 		Width  int
@@ -46,6 +45,14 @@ var (
 	ErrInvalidWidth  = errors.New("invalid requested width")
 )
 
+// extensions are the accepted formats, keyed by the name the registered decoders
+// report.
+var extensions = map[string]string{
+	"jpeg": "jpg",
+	"png":  "png",
+	"webp": "webp",
+}
+
 func DefaultOpts() Opts {
 	return Opts{
 		Quality:                82,
@@ -55,34 +62,26 @@ func DefaultOpts() Opts {
 	}
 }
 
-// Inspect validates the container and reads the dimensions from the header
-// without allocating a pixel buffer. Normalize takes the Info it returns, so an
-// oversized or unsupported upload is always rejected before it is decoded.
+// Inspect reads the container and dimensions from the header without allocating a
+// pixel buffer. Normalize takes the Info it returns, so an unreadable or
+// oversized upload is rejected before it is decoded.
 func Inspect(src []byte, maxPixels int) (Info, error) {
-	kind, err := filetype.Match(src)
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(src))
 	if err != nil {
-		return Info{}, err
-	}
-	switch kind.Extension {
-	case "jpg", "png", "webp":
-	default:
 		return Info{}, ErrUnsupported
 	}
-
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(src))
-	if err != nil {
-		return Info{}, err
+	ext, ok := extensions[format]
+	if !ok {
+		return Info{}, ErrUnsupported
 	}
 	if maxPixels > 0 && int64(cfg.Width)*int64(cfg.Height) > int64(maxPixels) {
 		return Info{}, ErrTooManyPixels
 	}
-
-	return Info{Format: kind.Extension, Width: cfg.Width, Height: cfg.Height}, nil
+	return Info{Format: ext, Width: cfg.Width, Height: cfg.Height}, nil
 }
 
-// Normalize decodes src once and produces exactly one output at
-// min(sourceWidth, requestedWidth), preserving the aspect ratio. info must come
-// from Inspect.
+// Normalize decodes src once and produces one output at
+// min(sourceWidth, requestedWidth), preserving the aspect ratio.
 func Normalize(src []byte, info Info, requestedWidth int, opts Opts) (Result, error) {
 	if requestedWidth <= 0 {
 		return Result{}, ErrInvalidWidth
@@ -104,10 +103,8 @@ func Normalize(src []byte, info Info, requestedWidth int, opts Opts) (Result, er
 	}
 	outH := img.Bounds().Dy()
 
-	// The source bytes may only be handed back untouched when nothing about the
-	// image changed. A quarter-turn EXIF rotation leaves the stored bytes
-	// describing a different frame than the caller will see, so those are always
-	// re-encoded upright rather than retained with their orientation tag.
+	// A quarter-turn EXIF rotation leaves the stored bytes describing a different
+	// frame than the caller will see, so those are re-encoded rather than kept.
 	retainable := outW == srcW && srcW == info.Width && srcH == info.Height
 
 	if info.Format == "webp" && retainable {
@@ -124,15 +121,13 @@ func Normalize(src []byte, info Info, requestedWidth int, opts Opts) (Result, er
 	return candidate, nil
 }
 
-// encode produces the single delivery encoding for img.
+// encode produces the one delivery encoding for img.
 //
-// Transparency has to survive, so anything carrying alpha is lossless. Anything
-// else is encoded lossy first and then measured: output that clears the quality
-// floor ships as it is. Only output that does not is also encoded lossless, and
-// then the smaller of the two wins. Lossless WebP beats lossy WebP on size
-// precisely for the flat, hard-edged content that lossy handles badly, so that
-// comparison separates logos and text from photographs without having to guess
-// at the subject from the container or from pixel statistics.
+// Alpha has to survive, so anything carrying it is lossless. Everything else is
+// encoded lossy and measured; only output that misses the floor is also encoded
+// lossless, and then the smaller wins. Lossless WebP beats lossy on size exactly
+// for the flat, hard-edged content lossy handles worst, which separates logos and
+// text from photographs without guessing from the container.
 func encode(img image.Image, w, h int, opts Opts) (Result, error) {
 	if imageHasAlpha(img) {
 		encoded, err := encodeWebP(img, opts, true, true)
@@ -216,11 +211,10 @@ func materiallySmaller(candidate, original []byte, ratio float64) bool {
 	return float64(len(candidate)) <= float64(len(original))*ratio
 }
 
-// measurePSNR compares the encoded candidate against the pixels it was made
-// from. Decoding goes through x/image/webp because it returns lossless WebP as
-// RGBA and lossy WebP as the YCbCr the file actually stores; a decoder that
-// forces every WebP to 4:2:0 YCbCr would charge the candidate for a conversion
-// its bytes do not contain and inflate the result by tens of decibels.
+// measurePSNR compares the candidate against the pixels it was made from.
+// Decoding goes through x/image/webp because it returns lossless WebP as RGBA and
+// lossy as the YCbCr the file stores; gen2brain's decoder forces every WebP to
+// 4:2:0 and would inflate the result by tens of decibels.
 func measurePSNR(src image.Image, encoded []byte) float64 {
 	got, err := xwebp.Decode(bytes.NewReader(encoded))
 	if err != nil {
@@ -256,42 +250,7 @@ func psnr(a, b image.Image) float64 {
 	return 10 * math.Log10((255*255)/mse)
 }
 
-// imageHasAlpha reports whether img carries a non-opaque pixel. Types with no
-// alpha channel answer immediately, and the packed 8-bit types are scanned over
-// their pixel slice: At() on a 12 MP frame is millions of interface calls.
 func imageHasAlpha(img image.Image) bool {
-	switch m := img.(type) {
-	case *image.NRGBA:
-		return anyTransparent(m.Pix, m.Stride, m.Rect.Dx(), m.Rect.Dy(), 4)
-	case *image.RGBA:
-		return anyTransparent(m.Pix, m.Stride, m.Rect.Dx(), m.Rect.Dy(), 4)
-	case *image.NRGBA64, *image.RGBA64, *image.NYCbCrA:
-		return anyTransparentAt(img)
-	default:
-		return false
-	}
-}
-
-func anyTransparent(pix []byte, stride, w, h, pixSize int) bool {
-	for y := 0; y < h; y++ {
-		row := pix[y*stride : y*stride+w*pixSize]
-		for x := pixSize - 1; x < len(row); x += pixSize {
-			if row[x] != 0xff {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func anyTransparentAt(img image.Image) bool {
-	b := img.Bounds()
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		for x := b.Min.X; x < b.Max.X; x++ {
-			if _, _, _, a := img.At(x, y).RGBA(); a < 0xffff {
-				return true
-			}
-		}
-	}
-	return false
+	o, ok := img.(interface{ Opaque() bool })
+	return ok && !o.Opaque()
 }

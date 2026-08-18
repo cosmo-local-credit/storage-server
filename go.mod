@@ -7,7 +7,6 @@ require (
 	github.com/disintegration/imaging v1.6.2
 	github.com/gen2brain/webp v0.6.4
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/h2non/filetype v1.1.3
 	github.com/kamikazechaser/common v0.2.0
 	github.com/knadh/koanf/parsers/toml v0.1.0
 	github.com/knadh/koanf/providers/env v0.1.0
