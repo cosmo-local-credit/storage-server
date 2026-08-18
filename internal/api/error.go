@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -17,8 +18,8 @@ type (
 	}
 
 	httpError struct {
-		StatusCode int    `json:"status"`
-		Message    string `json:"message"`
+		statusCode int
+		code       string
 	}
 
 	errorProvider struct {
@@ -37,77 +38,79 @@ var (
 	ErrInvalidWidth            = errors.New("invalid width")
 )
 
+// sentinelErrors maps the errors a handler can return onto the wire vocabulary.
+// Every entry is a distinct sentinel, so the order of the table does not matter.
+var sentinelErrors = []struct {
+	err    error
+	status int
+	code   string
+}{
+	{ErrUnauthorized, http.StatusUnauthorized, "UNAUTHORIZED"},
+	{ErrFormFolderKeyNotFound, http.StatusBadRequest, "MISSING_FOLDER"},
+	{ErrFormFileNameKeyNotFound, http.StatusBadRequest, "MISSING_NAME"},
+	{ErrInvalidFolder, http.StatusBadRequest, "INVALID_FOLDER"},
+	{ErrInvalidName, http.StatusBadRequest, "INVALID_NAME"},
+	{ErrInvalidWidth, http.StatusBadRequest, "INVALID_WIDTH"},
+	{ErrImageTooLarge, http.StatusBadRequest, "IMAGE_TOO_LARGE"},
+	{ErrNotImageFile, http.StatusBadRequest, "UNSUPPORTED_FILE_EXTENSION"},
+	{http.ErrNotMultipart, http.StatusBadRequest, "NOT_MULTIPART"},
+	{http.ErrMissingFile, http.StatusBadRequest, "MISSING_FILE"},
+	{io.EOF, http.StatusBadRequest, "EOF"},
+	{os.ErrDeadlineExceeded, http.StatusRequestTimeout, "DEADLINE_EXCEEDED"},
+	{context.DeadlineExceeded, http.StatusRequestTimeout, "DEADLINE_EXCEEDED"},
+	{context.Canceled, http.StatusRequestTimeout, "REQUEST_CANCELED"},
+}
+
+// echoStatusCodes maps the statuses Echo raises on its own onto the wire
+// vocabulary. Without an entry here a router-level refusal would be reported as
+// an internal error.
+var echoStatusCodes = map[int]string{
+	http.StatusBadRequest:            "BAD_REQUEST",
+	http.StatusNotFound:              "NOT_FOUND",
+	http.StatusMethodNotAllowed:      "METHOD_NOT_ALLOWED",
+	http.StatusRequestEntityTooLarge: "FILE_SIZE_LIMIT_EXCEEDED",
+	http.StatusUnsupportedMediaType:  "UNSUPPORTED_MEDIA_TYPE",
+}
+
 func (e *httpError) HTTPStatusCode() int {
-	return e.StatusCode
+	return e.statusCode
 }
 
 func (e *httpError) Error() string {
-	return e.Message
+	return e.code
 }
 
-func newError(status int, message string) Error {
+func newError(status int, code string) Error {
 	return &httpError{
-		StatusCode: status,
-		Message:    message,
+		statusCode: status,
+		code:       code,
 	}
 }
 
 func (e *errorProvider) from(err error) Error {
-	switch err := err.(type) {
-	case Error:
-		return err
-	case *http.MaxBytesError:
-		return newError(http.StatusRequestEntityTooLarge, "FILE_SIZE_LIMIT_EXCEEDED")
+	var apiErr Error
+	if errors.As(err, &apiErr) {
+		return apiErr
 	}
 
-	if errors.Is(err, echo.ErrStatusRequestEntityTooLarge) {
-		return newError(http.StatusRequestEntityTooLarge, "FILE_SIZE_LIMIT_EXCEEDED")
-	}
-	var sc echo.HTTPStatusCoder
-	if errors.As(err, &sc) {
-		switch sc.StatusCode() {
-		case http.StatusRequestEntityTooLarge:
-			return newError(http.StatusRequestEntityTooLarge, "FILE_SIZE_LIMIT_EXCEEDED")
-		case http.StatusNotFound:
-			return newError(http.StatusNotFound, "NOT_FOUND")
+	for _, s := range sentinelErrors {
+		if errors.Is(err, s.err) {
+			return newError(s.status, s.code)
 		}
 	}
 
-	if errors.Is(err, io.EOF) {
-		return newError(http.StatusBadRequest, "EOF")
+	// MaxBytesError carries the limit rather than being a sentinel, so it needs
+	// its own check.
+	var maxBytes *http.MaxBytesError
+	if errors.As(err, &maxBytes) {
+		return newError(http.StatusRequestEntityTooLarge, "FILE_SIZE_LIMIT_EXCEEDED")
 	}
-	if errors.Is(err, os.ErrDeadlineExceeded) {
-		return newError(http.StatusRequestTimeout, "DEADLINE_EXCEEDED")
-	}
-	if errors.Is(err, http.ErrNotMultipart) {
-		return newError(http.StatusBadRequest, "NOT_MULTIPART")
-	}
-	if errors.Is(err, http.ErrMissingFile) {
-		return newError(http.StatusBadRequest, "MISSING_FILE")
-	}
-	if errors.Is(err, ErrFormFolderKeyNotFound) {
-		return newError(http.StatusBadRequest, "MISSING_FOLDER")
-	}
-	if errors.Is(err, ErrFormFileNameKeyNotFound) {
-		return newError(http.StatusBadRequest, "MISSING_NAME")
-	}
-	if errors.Is(err, ErrInvalidFolder) {
-		return newError(http.StatusBadRequest, "INVALID_FOLDER")
-	}
-	if errors.Is(err, ErrInvalidName) {
-		return newError(http.StatusBadRequest, "INVALID_NAME")
-	}
-	if errors.Is(err, ErrImageTooLarge) {
-		return newError(http.StatusBadRequest, "IMAGE_TOO_LARGE")
-	}
-	if errors.Is(err, ErrInvalidWidth) {
-		return newError(http.StatusBadRequest, "INVALID_WIDTH")
-	}
-	if errors.Is(err, ErrNotImageFile) {
-		return newError(http.StatusBadRequest, "UNSUPPORTED_FILE_EXTENSION")
-	}
-	if errors.Is(err, ErrUnauthorized) {
-		return newError(http.StatusUnauthorized, "UNAUTHORIZED")
+
+	var coder echo.HTTPStatusCoder
+	if errors.As(err, &coder) {
+		if code, ok := echoStatusCodes[coder.StatusCode()]; ok {
+			return newError(coder.StatusCode(), code)
+		}
 	}
 
 	e.logg.Error("internal server error", "error", err)
