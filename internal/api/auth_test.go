@@ -53,11 +53,10 @@ func TestUploadAuthFailures(t *testing.T) {
 		return strings.NewReader(b.String()), ctype
 	}
 
-	otherPub, otherPriv, err := ed25519.GenerateKey(rand.Reader)
+	_, otherPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = otherPub
 	wrongSig, err := jwt.NewWithClaims(jwt.SigningMethodEdDSA, userClaims("USER")).SignedString(otherPriv)
 	if err != nil {
 		t.Fatal(err)
@@ -90,6 +89,8 @@ func TestUploadAuthFailures(t *testing.T) {
 		{name: "missing header"},
 		{name: "malformed bearer", header: "Bearer"},
 		{name: "basic scheme", header: "Basic abc"},
+		{name: "bearer with no space", header: "Bearer" + env.token(t, userClaims("USER"))},
+		{name: "empty bearer token", header: "Bearer "},
 		{name: "invalid signature", header: "Bearer " + wrongSig},
 		{name: "expired", header: "Bearer " + env.token(t, expired)},
 		{name: "missing exp", header: "Bearer " + env.token(t, missingExp)},
@@ -116,5 +117,46 @@ func TestUploadAuthFailures(t *testing.T) {
 				t.Fatalf("code = %v, want UNAUTHORIZED", got["code"])
 			}
 		})
+	}
+}
+
+func TestUploadAcceptsAnyCaseBearerScheme(t *testing.T) {
+	// RFC 7235 makes the auth scheme a case-insensitive token, so a client that
+	// sends it lowercase must not be turned away.
+	store := &recordingStorage{}
+	env := newTestEnv(t, store)
+	file := photoJPEG(t, 64, 48, 1)
+
+	for _, scheme := range []string{"Bearer", "bearer", "BEARER", "BeArEr"} {
+		body, ctype := multipartBody(t, map[string]string{
+			"folder": "voucher",
+			"name":   "anycase",
+			"width":  "400",
+		}, "photo.jpg", file)
+		req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)
+		req.Header.Set("Content-Type", ctype)
+		req.Header.Set("Authorization", scheme+" "+env.token(t, userClaims("USER")))
+		res := httptest.NewRecorder()
+		env.api.Handler().ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("scheme %q: status = %d, want 200 body=%s", scheme, res.Code, res.Body.String())
+		}
+	}
+}
+
+func TestUploadRejectsBeforeParsingBody(t *testing.T) {
+	// An unauthenticated request must cost nothing beyond the header check: the
+	// body here is not valid multipart at all, and a 400 would prove it was read.
+	env := newTestEnv(t, &recordingStorage{})
+	req := httptest.NewRequest(http.MethodPost, "/v1/upload", strings.NewReader("not multipart at all"))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=nope")
+	res := httptest.NewRecorder()
+	env.api.Handler().ServeHTTP(res, req)
+
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 before the body is parsed body=%s", res.Code, res.Body.String())
+	}
+	if got := decodeJSON(t, res)["code"]; got != "UNAUTHORIZED" {
+		t.Fatalf("code = %v, want UNAUTHORIZED", got)
 	}
 }
