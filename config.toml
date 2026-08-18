@@ -3,7 +3,7 @@ enable = true
 
 [api]
 address = ":5003"
-max_body_size = 5
+max_body_size = 8
 origin = ["https://sarafu.network", "https://preview.sarafu.network", "http://localhost:3000"]
 allowed_folders = ["voucher", "profile"]
 cdn_base_url = "https://content.sarafu.network"
@@ -13,7 +13,9 @@ upload_timeout = "60s"
 allowed_widths           = [400, 800, 1280]
 quality                  = 82
 method                   = 6
-max_pixels               = 50000000
+# 12.5 MP admits a 4032x3024 phone photo; each in-flight decode costs roughly
+# four bytes per pixel, so this bounds memory together with normalize_concurrency.
+max_pixels               = 12500000
 materially_smaller_ratio = 0.90
 min_psnr                 = 30
 normalize_concurrency    = 4
