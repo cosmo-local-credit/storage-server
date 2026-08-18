@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/grassrootseconomics/storage-server/internal/api"
 	"github.com/grassrootseconomics/storage-server/internal/image"
 	"github.com/grassrootseconomics/storage-server/internal/s3"
@@ -55,9 +54,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	verifyingKey, err := jwt.ParseEdPublicKeyFromPEM([]byte(ko.MustString("auth.public_key")))
+	verifyingKey, err := api.LoadVerifyingKey(ko.MustString("auth.public_key"))
 	if err != nil {
-		lo.Error("could not parse auth public key", "error", err)
+		lo.Error("could not load auth verifying key", "error", err)
 		os.Exit(1)
 	}
 

@@ -1,8 +1,12 @@
 package api
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -158,5 +162,112 @@ func TestUploadRejectsBeforeParsingBody(t *testing.T) {
 	}
 	if got := decodeJSON(t, res)["code"]; got != "UNAUTHORIZED" {
 		t.Fatalf("code = %v, want UNAUTHORIZED", got)
+	}
+}
+
+func pemBlock(t *testing.T, kind string, der []byte) string {
+	t.Helper()
+	return string(pem.EncodeToMemory(&pem.Block{Type: kind, Bytes: der}))
+}
+
+func TestLoadVerifyingKey(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubDER, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privDER, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ecDER, err := x509.MarshalPKIXPublicKey(&ecKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LoadVerifyingKey(pemBlock(t, "PUBLIC KEY", pubDER))
+	if err != nil {
+		t.Fatalf("valid public key rejected: %v", err)
+	}
+	if !got.Equal(pub) {
+		t.Fatal("loaded key does not match the generated key")
+	}
+
+	for _, tc := range []struct {
+		name string
+		pem  string
+	}{
+		// This service verifies; it must never be handed the signing key, so a
+		// private-key PEM has to be refused rather than quietly used.
+		{"ed25519 private key", pemBlock(t, "PRIVATE KEY", privDER)},
+		{"non-ed25519 public key", pemBlock(t, "PUBLIC KEY", ecDER)},
+		{"empty", ""},
+		{"not pem", "MCowBQYDK2VwAyEAd5osN95MX4qOplzCcXvWggSe79YKbJLJbQWEaL0sRnE="},
+		{"truncated key", pemBlock(t, "PUBLIC KEY", pubDER[:len(pubDER)-4])},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := LoadVerifyingKey(tc.pem); err == nil {
+				t.Fatal("want an error")
+			}
+		})
+	}
+}
+
+func TestLoadedKeyVerifiesRealTokens(t *testing.T) {
+	// Close the loop: a key that came through PEM must accept a token signed by
+	// its private half and reject one signed by any other.
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubDER, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadVerifyingKey(pemBlock(t, "PUBLIC KEY", pubDER))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store := &recordingStorage{}
+	env := newTestEnv(t, store, func(o *APIOpts) {
+		o.VerifyingKey = loaded
+	})
+	file := photoJPEG(t, 64, 48, 1)
+
+	sign := func(key ed25519.PrivateKey) int {
+		t.Helper()
+		token, err := jwt.NewWithClaims(jwt.SigningMethodEdDSA, userClaims("USER")).SignedString(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, ctype := multipartBody(t, map[string]string{
+			"folder": "voucher", "name": "pemloaded", "width": "400",
+		}, "photo.jpg", file)
+		req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)
+		req.Header.Set("Content-Type", ctype)
+		req.Header.Set("Authorization", "Bearer "+token)
+		res := httptest.NewRecorder()
+		env.api.Handler().ServeHTTP(res, req)
+		return res.Code
+	}
+
+	if code := sign(priv); code != http.StatusOK {
+		t.Fatalf("token from the matching private key: status = %d, want 200", code)
+	}
+	_, otherPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := sign(otherPriv); code != http.StatusUnauthorized {
+		t.Fatalf("token from a foreign key: status = %d, want 401", code)
 	}
 }

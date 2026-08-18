@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,6 +14,31 @@ import (
 // bearerPrefix is matched case-insensitively: RFC 7235 defines the auth scheme
 // as a case-insensitive token.
 const bearerPrefix = "bearer "
+
+// LoadVerifyingKey parses clc-core's Ed25519 verification key from PEM.
+//
+// It returns the concrete key type rather than crypto.PublicKey, which is an
+// alias for any. Threading that through the API options means a missing or
+// wrong-typed key still compiles and only shows up later as an indistinguishable
+// 401 on every request; resolving it here makes it a startup failure instead.
+//
+// Only the public half belongs in this service, and a private-key PEM is PKCS#8
+// rather than PKIX so it is refused rather than silently accepted.
+func LoadVerifyingKey(publicKeyPem string) (ed25519.PublicKey, error) {
+	parsed, err := jwt.ParseEdPublicKeyFromPEM([]byte(publicKeyPem))
+	if err != nil {
+		return nil, err
+	}
+
+	key, ok := parsed.(ed25519.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("auth: want an ed25519 public key, got %T", parsed)
+	}
+	if len(key) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("auth: ed25519 public key is %d bytes, want %d", len(key), ed25519.PublicKeySize)
+	}
+	return key, nil
+}
 
 // tokenClaims covers both clc-core identity shapes. Only the claim names are
 // shared with clc-core; role, service and permission level are read to confirm

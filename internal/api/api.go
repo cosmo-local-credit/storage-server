@@ -2,7 +2,7 @@ package api
 
 import (
 	"context"
-	"crypto"
+	"crypto/ed25519"
 	"log/slog"
 	"net/http"
 	"time"
@@ -27,7 +27,7 @@ type (
 		UploadTimeout        time.Duration
 		ClockSkew            time.Duration
 		Image                image.Opts
-		VerifyingKey         crypto.PublicKey
+		VerifyingKey         ed25519.PublicKey
 		StorageProvider      storage.Storage
 		Logg                 *slog.Logger
 	}
@@ -35,7 +35,7 @@ type (
 	API struct {
 		logg          *slog.Logger
 		errorProvider *errorProvider
-		verifyingKey  crypto.PublicKey
+		verifyingKey  ed25519.PublicKey
 		clockSkew     time.Duration
 		server        *http.Server
 	}
