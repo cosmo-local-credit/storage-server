@@ -5,7 +5,6 @@ import (
 	"crypto"
 	"log/slog"
 	"net/http"
-	"runtime"
 	"time"
 
 	"github.com/grassrootseconomics/storage-server/internal/image"
@@ -16,20 +15,21 @@ import (
 
 type (
 	APIOpts struct {
-		EnableMetrics   bool
-		ListenAddress   string
-		MaxBodySize     int64
-		MaxPixels       int
-		CORS            []string
-		AllowedFolders  []string
-		AllowedWidths   []int
-		CDNBaseURL      string
-		UploadTimeout   time.Duration
-		ClockSkew       time.Duration
-		Image           image.Opts
-		VerifyingKey    crypto.PublicKey
-		StorageProvider storage.Storage
-		Logg            *slog.Logger
+		EnableMetrics        bool
+		ListenAddress        string
+		MaxBodySize          int64
+		MaxPixels            int
+		NormalizeConcurrency int
+		CORS                 []string
+		AllowedFolders       []string
+		AllowedWidths        []int
+		CDNBaseURL           string
+		UploadTimeout        time.Duration
+		ClockSkew            time.Duration
+		Image                image.Opts
+		VerifyingKey         crypto.PublicKey
+		StorageProvider      storage.Storage
+		Logg                 *slog.Logger
 	}
 
 	API struct {
@@ -96,11 +96,6 @@ func New(o APIOpts) *API {
 		router.GET("/metrics", metricsHandler.metrics)
 	}
 
-	workers := runtime.GOMAXPROCS(0)
-	if workers < 1 {
-		workers = 1
-	}
-
 	uploadHandler := &uploadHandler{
 		storage:        o.StorageProvider,
 		maxBodySize:    o.MaxBodySize,
@@ -109,7 +104,7 @@ func New(o APIOpts) *API {
 		allowedWidths:  o.AllowedWidths,
 		cdnBaseURL:     o.CDNBaseURL,
 		imageOpts:      o.Image,
-		sem:            make(chan struct{}, workers),
+		sem:            make(chan struct{}, max(o.NormalizeConcurrency, 1)),
 	}
 	v1 := router.Group(apiVersion)
 	v1.Use(middleware.BodyLimit(o.MaxBodySize))

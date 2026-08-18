@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -78,15 +79,10 @@ func (u *uploadHandler) upload(c *echo.Context) error {
 		return imageError(err)
 	}
 
-	u.sem <- struct{}{}
-	start := time.Now()
-	result, err := img.Normalize(src, info, requestedWidth, u.imageOpts)
-	<-u.sem
+	result, err := u.normalize(ctx, src, info, requestedWidth)
 	if err != nil {
 		return imageError(err)
 	}
-
-	recordUploadMetrics(info.Format, result, requestedWidth, len(src), start)
 
 	filePath := fmt.Sprintf("%s_%d.%s", fileName, result.Width, result.Extension)
 	if err := u.storage.Upload(
@@ -106,6 +102,32 @@ func (u *uploadHandler) upload(c *echo.Context) error {
 			"s3": fmt.Sprintf("%s/%s/%s", u.cdnBaseURL, folder, filePath),
 		},
 	})
+}
+
+// normalize encodes one image while holding a slot from the concurrency gate.
+//
+// Normalize allocates on the order of the source's pixel count, so the gate
+// bounds memory rather than CPU and is sized independently of core count. The
+// slot is taken with the request context in play so a burst does not queue
+// behind clients that have already gone away, and released with defer so a panic
+// recovered by the router cannot retire a slot for the lifetime of the process.
+// It is given up before the upload starts; waiting on object storage does not
+// need a decode budget.
+func (u *uploadHandler) normalize(ctx context.Context, src []byte, info img.Info, width int) (img.Result, error) {
+	select {
+	case u.sem <- struct{}{}:
+	case <-ctx.Done():
+		return img.Result{}, ctx.Err()
+	}
+	defer func() { <-u.sem }()
+
+	start := time.Now()
+	result, err := img.Normalize(src, info, width, u.imageOpts)
+	if err != nil {
+		return img.Result{}, err
+	}
+	recordUploadMetrics(info.Format, result, width, len(src), start)
+	return result, nil
 }
 
 // imageError maps the image package's sentinels onto the API's error vocabulary.

@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"io"
@@ -79,20 +80,21 @@ func newTestEnv(t *testing.T, store storage.Storage, overrides ...func(*APIOpts)
 		t.Fatal(err)
 	}
 	o := APIOpts{
-		EnableMetrics:   true,
-		ListenAddress:   "127.0.0.1:0",
-		MaxBodySize:     1 << 20,
-		MaxPixels:       50_000_000,
-		CORS:            []string{"https://sarafu.network", "http://localhost:3000"},
-		AllowedFolders:  []string{"voucher", "profile"},
-		AllowedWidths:   []int{400, 800, 1280},
-		CDNBaseURL:      "https://content.sarafu.network",
-		UploadTimeout:   5 * time.Second,
-		Image:           img.DefaultOpts(),
-		ClockSkew:       30 * time.Second,
-		VerifyingKey:    pub,
-		StorageProvider: store,
-		Logg:            slog.New(slog.NewTextHandler(io.Discard, nil)),
+		EnableMetrics:        true,
+		ListenAddress:        "127.0.0.1:0",
+		MaxBodySize:          1 << 20,
+		MaxPixels:            12_500_000,
+		NormalizeConcurrency: 4,
+		CORS:                 []string{"https://sarafu.network", "http://localhost:3000"},
+		AllowedFolders:       []string{"voucher", "profile"},
+		AllowedWidths:        []int{400, 800, 1280},
+		CDNBaseURL:           "https://content.sarafu.network",
+		UploadTimeout:        5 * time.Second,
+		Image:                img.DefaultOpts(),
+		ClockSkew:            30 * time.Second,
+		VerifyingKey:         pub,
+		StorageProvider:      store,
+		Logg:                 slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	for _, fn := range overrides {
 		fn(&o)
@@ -561,5 +563,95 @@ func TestUploadRejectsOversizedPixels(t *testing.T) {
 	got := decodeJSON(t, res)
 	if got["code"] != "IMAGE_TOO_LARGE" {
 		t.Fatalf("code = %v, want IMAGE_TOO_LARGE", got["code"])
+	}
+}
+
+func TestUploadConcurrencyGateReleasesSlots(t *testing.T) {
+	// A single slot, more requests than slots, and every one must still complete:
+	// a slot that is not returned would hang the rest of the run.
+	store := &recordingStorage{}
+	env := newTestEnv(t, store, func(o *APIOpts) {
+		o.NormalizeConcurrency = 1
+	})
+	file := jpegBytes(t, 200, 150)
+
+	const requests = 8
+	var wg sync.WaitGroup
+	codes := make([]int, requests)
+	for i := range requests {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body, ctype := multipartBody(t, map[string]string{
+				"folder": "voucher",
+				"name":   fmt.Sprintf("concurrent%d", i),
+				"width":  "400",
+			}, "photo.jpg", file)
+			req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)
+			req.Header.Set("Content-Type", ctype)
+			req.Header.Set("Authorization", "Bearer "+env.token(t, userClaims("USER")))
+			res := httptest.NewRecorder()
+			env.api.Handler().ServeHTTP(res, req)
+			codes[i] = res.Code
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("uploads did not finish: a concurrency slot was not released")
+	}
+
+	for i, code := range codes {
+		if code != http.StatusOK {
+			t.Fatalf("request %d status = %d, want 200", i, code)
+		}
+	}
+	if len(store.uploads) != requests {
+		t.Fatalf("uploads = %d, want %d", len(store.uploads), requests)
+	}
+}
+
+func TestNormalizeGivesUpWhenRequestIsAbandoned(t *testing.T) {
+	// The gate is filled by hand so the only ready case is the dead context;
+	// racing a real upload against it would leave the outcome to the scheduler.
+	u := &uploadHandler{sem: make(chan struct{}, 1), imageOpts: img.DefaultOpts()}
+	u.sem <- struct{}{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := u.normalize(ctx, nil, img.Info{Format: "jpg"}, 400)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("blocked on the concurrency gate instead of giving up")
+	}
+}
+
+func TestNormalizeReleasesSlotOnError(t *testing.T) {
+	u := &uploadHandler{sem: make(chan struct{}, 1), imageOpts: img.DefaultOpts()}
+
+	if _, err := u.normalize(context.Background(), []byte("not an image"), img.Info{Format: "jpg"}, 400); err == nil {
+		t.Fatal("want an error from a non-image source")
+	}
+
+	select {
+	case u.sem <- struct{}{}:
+	default:
+		t.Fatal("slot was not released after a failed encode")
 	}
 }

@@ -68,16 +68,17 @@ func main() {
 	}
 
 	apiServer := api.New(api.APIOpts{
-		EnableMetrics:  ko.Bool("metrics.enable"),
-		ListenAddress:  ko.MustString("api.address"),
-		MaxBodySize:    ko.MustInt64("api.max_body_size") << 20,
-		MaxPixels:      ko.MustInt("image.max_pixels"),
-		CORS:           ko.MustStrings("api.origin"),
-		AllowedFolders: ko.MustStrings("api.allowed_folders"),
-		AllowedWidths:  ko.MustInts("image.allowed_widths"),
-		CDNBaseURL:     ko.MustString("api.cdn_base_url"),
-		UploadTimeout:  ko.MustDuration("api.upload_timeout"),
-		ClockSkew:      ko.MustDuration("auth.clock_skew"),
+		EnableMetrics:        ko.Bool("metrics.enable"),
+		ListenAddress:        ko.MustString("api.address"),
+		MaxBodySize:          ko.MustInt64("api.max_body_size") << 20,
+		MaxPixels:            ko.MustInt("image.max_pixels"),
+		NormalizeConcurrency: ko.MustInt("image.normalize_concurrency"),
+		CORS:                 ko.MustStrings("api.origin"),
+		AllowedFolders:       ko.MustStrings("api.allowed_folders"),
+		AllowedWidths:        ko.MustInts("image.allowed_widths"),
+		CDNBaseURL:           ko.MustString("api.cdn_base_url"),
+		UploadTimeout:        ko.MustDuration("api.upload_timeout"),
+		ClockSkew:            ko.MustDuration("auth.clock_skew"),
 		Image: image.Opts{
 			Quality:                ko.MustInt("image.quality"),
 			Method:                 ko.MustInt("image.method"),

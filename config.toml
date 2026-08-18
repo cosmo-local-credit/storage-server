@@ -16,6 +16,7 @@ method                   = 6
 max_pixels               = 50000000
 materially_smaller_ratio = 0.90
 min_psnr                 = 30
+normalize_concurrency    = 4
 
 [auth]
 # Ed25519 public key matching clc-core's signing key. Never configure its private key.
