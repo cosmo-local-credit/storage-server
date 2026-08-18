@@ -3,6 +3,8 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -84,7 +86,7 @@ func (u *uploadHandler) upload(c *echo.Context) error {
 		return imageError(err)
 	}
 
-	filePath := fmt.Sprintf("%s_%d.%s", fileName, result.Width, result.Extension)
+	filePath := fmt.Sprintf("%s_%d_%s.%s", fileName, result.Width, contentTag(result.Bytes), result.Extension)
 	if err := u.storage.Upload(
 		ctx,
 		filePath,
@@ -128,6 +130,16 @@ func (u *uploadHandler) normalize(ctx context.Context, src []byte, info img.Info
 	}
 	recordUploadMetrics(info.Format, result, width, len(src), start)
 	return result, nil
+}
+
+// contentTag is a short digest of the bytes about to be stored. Including it in
+// the key makes the key a function of the content: re-uploading under a name that
+// already exists publishes a new URL instead of replacing an object that CDN
+// caches have been told is immutable. Eight hex digits are ample here because a
+// collision would also have to land on the same folder, name and width.
+func contentTag(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:4])
 }
 
 // imageError maps the image package's sentinels onto the API's error vocabulary.

@@ -9,12 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"io"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -134,14 +136,40 @@ func serviceClaims() tokenClaims {
 	}
 }
 
-func jpegBytes(t *testing.T, w, h int) []byte {
+// photoJPEG builds a photograph-like fixture. seed varies the pixels so two
+// uploads can be made deliberately different; a solid frame would compress to
+// almost nothing and would not exercise the encoder at all.
+func photoJPEG(t *testing.T, w, h, seed int) []byte {
 	t.Helper()
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	state := uint32(0x9e3779b9 + seed*2654435761)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			state = state*1664525 + 1013904223
+			n := int(state>>24) - 128
+			img.SetNRGBA(x, y, color.NRGBA{
+				R: clamp8(70 + (x*90)/w + n/3),
+				G: clamp8(90 + (y*70)/h + n/4),
+				B: clamp8(60 + ((x+y)*60)/(w+h) + n/5),
+				A: 255,
+			})
+		}
+	}
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 92}); err != nil {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+func clamp8(v int) uint8 {
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return uint8(v)
 }
 
 func multipartBody(t *testing.T, fields map[string]string, filename string, file []byte) (*bytes.Buffer, string) {
@@ -180,7 +208,7 @@ func decodeJSON(t *testing.T, res *httptest.ResponseRecorder) map[string]any {
 func TestUploadSuccessJSON(t *testing.T) {
 	store := &recordingStorage{}
 	env := newTestEnv(t, store)
-	file := jpegBytes(t, 800, 500)
+	file := photoJPEG(t, 800, 500, 1)
 	body, ctype := multipartBody(t, map[string]string{
 		"folder": "voucher",
 		"name":   "bd10fd365101425f8bafeb6adfe8007c",
@@ -202,15 +230,21 @@ func TestUploadSuccessJSON(t *testing.T) {
 	}
 	payload, _ := got["payload"].(map[string]any)
 	s3URL, _ := payload["s3"].(string)
-	if !strings.HasPrefix(s3URL, "https://content.sarafu.network/voucher/bd10fd365101425f8bafeb6adfe8007c_400.") {
+	if !keyPattern.MatchString(s3URL) {
+		t.Fatalf("s3 = %v, want a content-tagged webp key", s3URL)
+	}
+	if !strings.HasPrefix(s3URL, "https://content.sarafu.network/voucher/bd10fd365101425f8bafeb6adfe8007c_400_") {
 		t.Fatalf("s3 = %v", s3URL)
 	}
 	if len(store.uploads) != 1 {
 		t.Fatalf("uploads = %d, want 1", len(store.uploads))
 	}
 	up := store.last()
-	if up.path != "voucher" || !strings.HasPrefix(up.name, "bd10fd365101425f8bafeb6adfe8007c_400.") {
+	if up.path != "voucher" || !strings.HasPrefix(up.name, "bd10fd365101425f8bafeb6adfe8007c_400_") {
 		t.Fatalf("stored key = %s/%s", up.path, up.name)
+	}
+	if up.contentType != "image/webp" {
+		t.Fatalf("content type = %s, want image/webp", up.contentType)
 	}
 	if up.size != int64(len(up.data)) {
 		t.Fatalf("stored size = %d, data = %d", up.size, len(up.data))
@@ -220,8 +254,59 @@ func TestUploadSuccessJSON(t *testing.T) {
 	}
 }
 
+// keyPattern is the shape the API promises: name, actual width, content tag and
+// an extension that matches the stored bytes.
+var keyPattern = regexp.MustCompile(
+	`^https://content\.sarafu\.network/(voucher|profile)/[A-Za-z0-9_-]{1,64}_\d+_[0-9a-f]{8}\.(webp|jpg|png)$`)
+
+func TestUploadKeyIsDerivedFromContent(t *testing.T) {
+	store := &recordingStorage{}
+	env := newTestEnv(t, store)
+
+	upload := func(file []byte) string {
+		t.Helper()
+		body, ctype := multipartBody(t, map[string]string{
+			"folder": "voucher",
+			"name":   "samename",
+			"width":  "400",
+		}, "photo.jpg", file)
+		req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)
+		req.Header.Set("Content-Type", ctype)
+		req.Header.Set("Authorization", "Bearer "+env.token(t, userClaims("USER")))
+		res := httptest.NewRecorder()
+		env.api.Handler().ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", res.Code, res.Body.String())
+		}
+		payload, _ := decodeJSON(t, res)["payload"].(map[string]any)
+		url, _ := payload["s3"].(string)
+		if !keyPattern.MatchString(url) {
+			t.Fatalf("s3 = %v, want a content-tagged key", url)
+		}
+		return url
+	}
+
+	first := upload(photoJPEG(t, 800, 500, 1))
+	again := upload(photoJPEG(t, 800, 500, 1))
+	other := upload(photoJPEG(t, 800, 500, 2))
+
+	// The same bytes under the same name must resolve to the same object, so a
+	// retry does not litter the bucket.
+	if first != again {
+		t.Fatalf("identical uploads produced different keys:\n  %s\n  %s", first, again)
+	}
+	// Different bytes under the same name must not collide, or an immutable CDN
+	// entry would keep serving the previous image.
+	if first == other {
+		t.Fatalf("different images shared a key: %s", first)
+	}
+	if len(store.uploads) != 3 {
+		t.Fatalf("uploads = %d, want 3", len(store.uploads))
+	}
+}
+
 func TestUploadErrorEnvelopes(t *testing.T) {
-	file := jpegBytes(t, 4, 4)
+	file := photoJPEG(t, 4, 4, 1)
 
 	cases := []struct {
 		name   string
@@ -355,7 +440,7 @@ func TestUploadBodyLimit(t *testing.T) {
 	env := newTestEnv(t, &recordingStorage{}, func(o *APIOpts) {
 		o.MaxBodySize = 256
 	})
-	file := jpegBytes(t, 64, 64)
+	file := photoJPEG(t, 64, 64, 1)
 	if len(file) < 256 {
 		t.Fatalf("fixture too small to exceed limit: %d", len(file))
 	}
@@ -478,7 +563,7 @@ func TestGracefulShutdown(t *testing.T) {
 func TestUploadNarrowerSourceUsesActualWidth(t *testing.T) {
 	store := &recordingStorage{}
 	env := newTestEnv(t, store)
-	file := jpegBytes(t, 200, 120)
+	file := photoJPEG(t, 200, 120, 1)
 	body, ctype := multipartBody(t, map[string]string{
 		"folder": "profile",
 		"name":   "smallsrc",
@@ -497,7 +582,7 @@ func TestUploadNarrowerSourceUsesActualWidth(t *testing.T) {
 	got := decodeJSON(t, res)
 	payload, _ := got["payload"].(map[string]any)
 	s3URL, _ := payload["s3"].(string)
-	if !strings.Contains(s3URL, "/profile/smallsrc_200.") {
+	if !strings.Contains(s3URL, "/profile/smallsrc_200_") {
 		t.Fatalf("s3 = %v, want actual width 200", s3URL)
 	}
 	if len(store.uploads) != 1 {
@@ -507,7 +592,7 @@ func TestUploadNarrowerSourceUsesActualWidth(t *testing.T) {
 
 func TestUploadRejectsMultipleWidths(t *testing.T) {
 	env := newTestEnv(t, &recordingStorage{})
-	file := jpegBytes(t, 8, 8)
+	file := photoJPEG(t, 8, 8, 1)
 	var body bytes.Buffer
 	w := multipart.NewWriter(&body)
 	_ = w.WriteField("folder", "voucher")
@@ -544,7 +629,7 @@ func TestUploadRejectsOversizedPixels(t *testing.T) {
 	env := newTestEnv(t, &recordingStorage{}, func(o *APIOpts) {
 		o.MaxPixels = 4
 	})
-	file := jpegBytes(t, 8, 8)
+	file := photoJPEG(t, 8, 8, 1)
 	body, ctype := multipartBody(t, map[string]string{
 		"folder": "voucher",
 		"name":   "huge",
@@ -573,7 +658,7 @@ func TestUploadConcurrencyGateReleasesSlots(t *testing.T) {
 	env := newTestEnv(t, store, func(o *APIOpts) {
 		o.NormalizeConcurrency = 1
 	})
-	file := jpegBytes(t, 200, 150)
+	file := photoJPEG(t, 200, 150, 1)
 
 	const requests = 8
 	var wg sync.WaitGroup

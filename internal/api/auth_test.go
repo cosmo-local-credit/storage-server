@@ -15,7 +15,7 @@ import (
 func TestUploadAcceptsKnownIdentities(t *testing.T) {
 	store := &recordingStorage{}
 	env := newTestEnv(t, store)
-	file := jpegBytes(t, 8, 8)
+	file := photoJPEG(t, 8, 8, 1)
 
 	for _, claims := range []jwt.Claims{
 		userClaims("USER"),
@@ -43,7 +43,7 @@ func TestUploadAcceptsKnownIdentities(t *testing.T) {
 
 func TestUploadAuthFailures(t *testing.T) {
 	env := newTestEnv(t, &recordingStorage{})
-	file := jpegBytes(t, 8, 8)
+	file := photoJPEG(t, 8, 8, 1)
 	bodyFor := func() (*strings.Reader, string) {
 		b, ctype := multipartBody(t, map[string]string{
 			"folder": "voucher",
