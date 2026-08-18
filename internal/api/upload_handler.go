@@ -8,11 +8,12 @@ import (
 
 	"github.com/grassrootseconomics/storage-server/internal/storage"
 	"github.com/h2non/filetype"
-	"github.com/uptrace/bunrouter"
+	"github.com/labstack/echo/v5"
 )
 
 type uploadHandler struct {
-	storage storage.Storage
+	storage     storage.Storage
+	maxBodySize int64
 }
 
 func newUploadHandler(storage storage.Storage) *uploadHandler {
@@ -21,25 +22,25 @@ func newUploadHandler(storage storage.Storage) *uploadHandler {
 	}
 }
 
-func (u *uploadHandler) upload(w http.ResponseWriter, r bunrouter.Request) error {
-	ctx := r.Context()
+func (u *uploadHandler) upload(c *echo.Context) error {
+	ctx := c.Request().Context()
 
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+	if err := c.Request().ParseMultipartForm(u.maxBodySize); err != nil {
 		return err
 	}
 
-	file, header, err := r.FormFile("file")
+	file, header, err := c.Request().FormFile("file")
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	folder := r.FormValue("folder")
+	folder := c.FormValue("folder")
 	if folder == "" {
 		return ErrFormFolderKeyNotFound
 	}
 
-	fileName := r.FormValue("name")
+	fileName := c.FormValue("name")
 	if fileName == "" {
 		return ErrFormFolderKeyNotFound
 	}
@@ -54,7 +55,6 @@ func (u *uploadHandler) upload(w http.ResponseWriter, r bunrouter.Request) error
 	}
 
 	if kind.Extension == "jpg" || kind.Extension == "png" || kind.Extension == "pdf" || kind.Extension == "webp" {
-		// newFileID := strings.Replace(uuid.NewString(), "-", "", -1)
 		filePath := fmt.Sprintf("%s.%s", fileName, kind.Extension)
 
 		if err := u.storage.Upload(
@@ -68,13 +68,13 @@ func (u *uploadHandler) upload(w http.ResponseWriter, r bunrouter.Request) error
 			return err
 		}
 
-		return bunrouter.JSON(w, bunrouter.H{
+		return c.JSON(http.StatusOK, map[string]any{
 			"ok": true,
-			"payload": bunrouter.H{
+			"payload": map[string]any{
 				"s3": fmt.Sprintf("%s/%s/%s", s3CDNPath, folder, filePath),
 			},
 		})
-	} else {
-		return ErrNotImageFile
 	}
+
+	return ErrNotImageFile
 }

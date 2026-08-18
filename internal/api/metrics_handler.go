@@ -1,10 +1,8 @@
 package api
 
 import (
-	"net/http"
-
 	"github.com/VictoriaMetrics/metrics"
-	"github.com/uptrace/bunrouter"
+	"github.com/labstack/echo/v5"
 )
 
 type metricsHandler struct {
@@ -17,9 +15,9 @@ func newMetricshandler(enable bool) *metricsHandler {
 	}
 }
 
-func (m *metricsHandler) metrics(w http.ResponseWriter, _ bunrouter.Request) error {
+func (m *metricsHandler) metrics(c *echo.Context) error {
 	if m.enable {
-		metrics.WritePrometheus(w, true)
+		metrics.WritePrometheus(c.Response(), true)
 	}
 	return nil
 }

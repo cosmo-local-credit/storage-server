@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+
+	"github.com/labstack/echo/v5"
 )
 
 type (
@@ -53,6 +55,14 @@ func (e *errorProvider) from(err error) Error {
 		return newError(http.StatusRequestEntityTooLarge, "FILE_SIZE_LIMIT_EXCEEDED")
 	}
 
+	if errors.Is(err, echo.ErrStatusRequestEntityTooLarge) {
+		return newError(http.StatusRequestEntityTooLarge, "FILE_SIZE_LIMIT_EXCEEDED")
+	}
+	var sc echo.HTTPStatusCoder
+	if errors.As(err, &sc) && sc.StatusCode() == http.StatusRequestEntityTooLarge {
+		return newError(http.StatusRequestEntityTooLarge, "FILE_SIZE_LIMIT_EXCEEDED")
+	}
+
 	if errors.Is(err, io.EOF) {
 		return newError(http.StatusBadRequest, "EOF")
 	}
@@ -70,7 +80,6 @@ func (e *errorProvider) from(err error) Error {
 	}
 	if errors.Is(err, ErrNotImageFile) {
 		return newError(http.StatusBadRequest, "UNSUPPORTED_FILE_EXTENSION")
-
 	}
 
 	e.logg.Error("internal server error", "error", err)

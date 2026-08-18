@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/grassrootseconomics/storage-server/internal/storage"
-	"github.com/uptrace/bunrouter"
-	"github.com/uptrace/bunrouter/extra/reqlog"
+	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 )
 
 type (
@@ -23,8 +23,9 @@ type (
 	}
 
 	API struct {
-		logg   *slog.Logger
-		server *http.Server
+		logg          *slog.Logger
+		errorProvider *errorProvider
+		server        *http.Server
 	}
 )
 
@@ -33,48 +34,69 @@ const (
 	s3CDNPath  = "https://content.sarafu.network"
 )
 
-var maxUploadSize int64
-
 func New(o APIOpts) *API {
 	errorProvider := &errorProvider{
 		logg: o.Logg,
 	}
-	middleware := &middleware{
-		errorProvider: errorProvider,
-		logg:          o.Logg,
-	}
-	maxUploadSize = o.MaxBodySize
 
-	router := bunrouter.New(
-		bunrouter.Use(middleware.errorMiddleware),
-		bunrouter.Use(reqlog.NewMiddleware(
-			reqlog.WithEnabled(false),
-			reqlog.WithVerbose(true),
-			reqlog.FromEnv("BUNDEBUG"),
-		)),
-	)
+	api := &API{
+		logg:          o.Logg,
+		errorProvider: errorProvider,
+	}
+
+	router := echo.New()
+	router.HTTPErrorHandler = api.customHTTPErrorHandler
+
+	router.Use(middleware.Recover())
+	router.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		LogStatus:   true,
+		LogURI:      true,
+		HandleError: true,
+		LogValuesFunc: func(_ *echo.Context, v middleware.RequestLoggerValues) error {
+			errMsg := ""
+			if v.Error != nil {
+				errMsg = v.Error.Error()
+			}
+			switch {
+			case v.Status >= http.StatusInternalServerError:
+				o.Logg.LogAttrs(context.Background(), slog.LevelError, http.StatusText(v.Status),
+					slog.String("uri", v.URI),
+					slog.Int("status", v.Status),
+					slog.String("err", errMsg),
+				)
+			default:
+				o.Logg.LogAttrs(context.Background(), slog.LevelInfo, http.StatusText(v.Status),
+					slog.String("uri", v.URI),
+					slog.Int("status", v.Status),
+				)
+			}
+			return nil
+		},
+	}))
+	router.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins:     o.CORS,
+		AllowCredentials: true,
+		AllowMethods:     []string{http.MethodGet, http.MethodHead, http.MethodPost},
+		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderXRequestedWith},
+	}))
 
 	metricsHandler := newMetricshandler(o.EnableMetrics)
 	router.GET("/metrics", metricsHandler.metrics)
 
-	apiGroup := router.NewGroup(apiVersion,
-		bunrouter.Use(middleware.maxUploadSizeMiddleware),
-		bunrouter.Use(newCorsMiddleware(o.CORS)),
-	)
-
 	uploadHandler := &uploadHandler{
-		storage: o.StorageProvider,
+		storage:     o.StorageProvider,
+		maxBodySize: o.MaxBodySize,
 	}
-	apiGroup.POST("/upload", uploadHandler.upload)
+	v1 := router.Group(apiVersion)
+	v1.Use(middleware.BodyLimit(o.MaxBodySize))
+	v1.POST("/upload", uploadHandler.upload)
 
-	return &API{
-		logg: o.Logg,
-		server: &http.Server{
-			ReadTimeout: o.UploadTimeout,
-			Addr:        o.ListenAddress,
-			Handler:     router,
-		},
+	api.server = &http.Server{
+		ReadTimeout: o.UploadTimeout,
+		Addr:        o.ListenAddress,
+		Handler:     router,
 	}
+	return api
 }
 
 func (a *API) Handler() http.Handler {
@@ -89,4 +111,16 @@ func (a *API) Start() error {
 func (a *API) Stop(ctx context.Context) error {
 	a.logg.Info("shutting down API server")
 	return a.server.Shutdown(ctx)
+}
+
+func (a *API) customHTTPErrorHandler(c *echo.Context, err error) {
+	if r, rErr := echo.UnwrapResponse(c.Response()); rErr == nil && r.Committed {
+		return
+	}
+
+	httpErr := a.errorProvider.from(err)
+	_ = c.JSON(httpErr.HTTPStatusCode(), map[string]any{
+		"ok":   false,
+		"code": httpErr.Error(),
+	})
 }
