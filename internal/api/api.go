@@ -5,8 +5,10 @@ import (
 	"crypto"
 	"log/slog"
 	"net/http"
+	"runtime"
 	"time"
 
+	"github.com/grassrootseconomics/storage-server/internal/image"
 	"github.com/grassrootseconomics/storage-server/internal/storage"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
@@ -20,8 +22,11 @@ type (
 		MaxPixels       int
 		CORS            []string
 		AllowedFolders  []string
+		AllowedWidths   []int
+		CDNBaseURL      string
 		UploadTimeout   time.Duration
 		ClockSkew       time.Duration
+		Image           image.Opts
 		VerifyingKey    crypto.PublicKey
 		StorageProvider storage.Storage
 		Logg            *slog.Logger
@@ -36,10 +41,7 @@ type (
 	}
 )
 
-const (
-	apiVersion = "/v1"
-	s3CDNPath  = "https://content.sarafu.network"
-)
+const apiVersion = "/v1"
 
 func New(o APIOpts) *API {
 	errorProvider := &errorProvider{
@@ -94,11 +96,20 @@ func New(o APIOpts) *API {
 		router.GET("/metrics", metricsHandler.metrics)
 	}
 
+	workers := runtime.GOMAXPROCS(0)
+	if workers < 1 {
+		workers = 1
+	}
+
 	uploadHandler := &uploadHandler{
 		storage:        o.StorageProvider,
 		maxBodySize:    o.MaxBodySize,
 		maxPixels:      o.MaxPixels,
 		allowedFolders: o.AllowedFolders,
+		allowedWidths:  o.AllowedWidths,
+		cdnBaseURL:     o.CDNBaseURL,
+		imageOpts:      o.Image,
+		sem:            make(chan struct{}, workers),
 	}
 	v1 := router.Group(apiVersion)
 	v1.Use(middleware.BodyLimit(o.MaxBodySize))

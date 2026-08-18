@@ -34,6 +34,7 @@ var (
 	ErrInvalidFolder           = errors.New("invalid folder")
 	ErrInvalidName             = errors.New("invalid name")
 	ErrImageTooLarge           = errors.New("image exceeds max pixels")
+	ErrInvalidWidth            = errors.New("invalid width")
 )
 
 func (e *httpError) HTTPStatusCode() int {
@@ -98,6 +99,9 @@ func (e *errorProvider) from(err error) Error {
 	}
 	if errors.Is(err, ErrImageTooLarge) {
 		return newError(http.StatusBadRequest, "IMAGE_TOO_LARGE")
+	}
+	if errors.Is(err, ErrInvalidWidth) {
+		return newError(http.StatusBadRequest, "INVALID_WIDTH")
 	}
 	if errors.Is(err, ErrNotImageFile) {
 		return newError(http.StatusBadRequest, "UNSUPPORTED_FILE_EXTENSION")

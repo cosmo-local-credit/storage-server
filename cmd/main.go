@@ -15,6 +15,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/grassrootseconomics/storage-server/internal/api"
+	"github.com/grassrootseconomics/storage-server/internal/image"
 	"github.com/grassrootseconomics/storage-server/internal/s3"
 	"github.com/knadh/koanf/v2"
 )
@@ -67,14 +68,22 @@ func main() {
 	}
 
 	apiServer := api.New(api.APIOpts{
-		EnableMetrics:   ko.Bool("metrics.enable"),
-		ListenAddress:   ko.MustString("api.address"),
-		MaxBodySize:     ko.MustInt64("api.max_body_size") << 20,
-		MaxPixels:       ko.MustInt("image.max_pixels"),
-		CORS:            ko.MustStrings("api.origin"),
-		AllowedFolders:  ko.MustStrings("api.allowed_folders"),
-		UploadTimeout:   5 * time.Second,
-		ClockSkew:       ko.MustDuration("auth.clock_skew"),
+		EnableMetrics:  ko.Bool("metrics.enable"),
+		ListenAddress:  ko.MustString("api.address"),
+		MaxBodySize:    ko.MustInt64("api.max_body_size") << 20,
+		MaxPixels:      ko.MustInt("image.max_pixels"),
+		CORS:           ko.MustStrings("api.origin"),
+		AllowedFolders: ko.MustStrings("api.allowed_folders"),
+		AllowedWidths:  ko.MustInts("image.allowed_widths"),
+		CDNBaseURL:     ko.MustString("api.cdn_base_url"),
+		UploadTimeout:  ko.MustDuration("api.upload_timeout"),
+		ClockSkew:      ko.MustDuration("auth.clock_skew"),
+		Image: image.Opts{
+			Quality:                ko.MustInt("image.quality"),
+			Method:                 ko.MustInt("image.method"),
+			MaxPixels:              ko.MustInt("image.max_pixels"),
+			MateriallySmallerRatio: ko.MustFloat64("image.materially_smaller_ratio"),
+		},
 		VerifyingKey:    verifyingKey,
 		StorageProvider: s3Uploader,
 		Logg:            lo,

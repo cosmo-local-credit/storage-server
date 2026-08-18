@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	img "github.com/grassrootseconomics/storage-server/internal/image"
 	"github.com/grassrootseconomics/storage-server/internal/storage"
 )
 
@@ -84,7 +85,10 @@ func newTestEnv(t *testing.T, store storage.Storage, overrides ...func(*APIOpts)
 		MaxPixels:       50_000_000,
 		CORS:            []string{"https://sarafu.network", "http://localhost:3000"},
 		AllowedFolders:  []string{"voucher", "profile"},
+		AllowedWidths:   []int{400, 800, 1280},
+		CDNBaseURL:      "https://content.sarafu.network",
 		UploadTimeout:   5 * time.Second,
+		Image:           img.DefaultOpts(),
 		ClockSkew:       30 * time.Second,
 		VerifyingKey:    pub,
 		StorageProvider: store,
@@ -174,10 +178,11 @@ func decodeJSON(t *testing.T, res *httptest.ResponseRecorder) map[string]any {
 func TestUploadSuccessJSON(t *testing.T) {
 	store := &recordingStorage{}
 	env := newTestEnv(t, store)
-	file := jpegBytes(t, 8, 8)
+	file := jpegBytes(t, 800, 500)
 	body, ctype := multipartBody(t, map[string]string{
 		"folder": "voucher",
 		"name":   "bd10fd365101425f8bafeb6adfe8007c",
+		"width":  "400",
 	}, "photo.jpg", file)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)
@@ -194,19 +199,22 @@ func TestUploadSuccessJSON(t *testing.T) {
 		t.Fatalf("ok = %v, want true", got["ok"])
 	}
 	payload, _ := got["payload"].(map[string]any)
-	want := "https://content.sarafu.network/voucher/bd10fd365101425f8bafeb6adfe8007c.jpg"
-	if payload["s3"] != want {
-		t.Fatalf("s3 = %v, want %s", payload["s3"], want)
+	s3URL, _ := payload["s3"].(string)
+	if !strings.HasPrefix(s3URL, "https://content.sarafu.network/voucher/bd10fd365101425f8bafeb6adfe8007c_400.") {
+		t.Fatalf("s3 = %v", s3URL)
 	}
 	if len(store.uploads) != 1 {
 		t.Fatalf("uploads = %d, want 1", len(store.uploads))
 	}
 	up := store.last()
-	if up.path != "voucher" || up.name != "bd10fd365101425f8bafeb6adfe8007c.jpg" {
+	if up.path != "voucher" || !strings.HasPrefix(up.name, "bd10fd365101425f8bafeb6adfe8007c_400.") {
 		t.Fatalf("stored key = %s/%s", up.path, up.name)
 	}
-	if up.contentType != "image/jpeg" {
-		t.Fatalf("content type = %s", up.contentType)
+	if up.size != int64(len(up.data)) {
+		t.Fatalf("stored size = %d, data = %d", up.size, len(up.data))
+	}
+	if !strings.HasSuffix(s3URL, "/"+up.path+"/"+up.name) {
+		t.Fatalf("url %s does not match stored object %s/%s", s3URL, up.path, up.name)
 	}
 }
 
@@ -226,7 +234,8 @@ func TestUploadErrorEnvelopes(t *testing.T) {
 		{
 			name: "missing folder",
 			fields: map[string]string{
-				"name": "abc",
+				"name":  "abc",
+				"width": "400",
 			},
 			file: "p.jpg",
 			data: file,
@@ -237,6 +246,7 @@ func TestUploadErrorEnvelopes(t *testing.T) {
 			name: "missing name",
 			fields: map[string]string{
 				"folder": "voucher",
+				"width":  "400",
 			},
 			file: "p.jpg",
 			data: file,
@@ -245,7 +255,7 @@ func TestUploadErrorEnvelopes(t *testing.T) {
 		},
 		{
 			name:   "invalid folder",
-			fields: map[string]string{"folder": "secret", "name": "abc"},
+			fields: map[string]string{"folder": "secret", "name": "abc", "width": "400"},
 			file:   "p.jpg",
 			data:   file,
 			code:   http.StatusBadRequest,
@@ -253,30 +263,54 @@ func TestUploadErrorEnvelopes(t *testing.T) {
 		},
 		{
 			name:   "invalid name",
-			fields: map[string]string{"folder": "voucher", "name": "../etc/passwd"},
+			fields: map[string]string{"folder": "voucher", "name": "../etc/passwd", "width": "400"},
 			file:   "p.jpg",
 			data:   file,
 			code:   http.StatusBadRequest,
 			err:    "INVALID_NAME",
 		},
 		{
-			name:   "missing file",
+			name:   "missing width",
 			fields: map[string]string{"folder": "voucher", "name": "abc"},
+			file:   "p.jpg",
+			data:   file,
+			code:   http.StatusBadRequest,
+			err:    "INVALID_WIDTH",
+		},
+		{
+			name:   "invalid width",
+			fields: map[string]string{"folder": "voucher", "name": "abc", "width": "123"},
+			file:   "p.jpg",
+			data:   file,
+			code:   http.StatusBadRequest,
+			err:    "INVALID_WIDTH",
+		},
+		{
+			name:   "missing file",
+			fields: map[string]string{"folder": "voucher", "name": "abc", "width": "400"},
 			code:   http.StatusBadRequest,
 			err:    "MISSING_FILE",
 		},
 		{
-			name:   "not multipart",
-			ctype:  "application/json",
-			body:   strings.NewReader(`{}`),
-			code:   http.StatusBadRequest,
-			err:    "NOT_MULTIPART",
+			name:  "not multipart",
+			ctype: "application/json",
+			body:  strings.NewReader(`{}`),
+			code:  http.StatusBadRequest,
+			err:   "NOT_MULTIPART",
 		},
 		{
 			name:   "unsupported type",
-			fields: map[string]string{"folder": "voucher", "name": "abc"},
+			fields: map[string]string{"folder": "voucher", "name": "abc", "width": "400"},
 			file:   "note.txt",
 			data:   []byte("hello world this is not an image"),
+			code:   http.StatusBadRequest,
+			err:    "UNSUPPORTED_FILE_EXTENSION",
+		},
+		{
+			name:   "pdf rejected",
+			fields: map[string]string{"folder": "voucher", "name": "abc", "width": "400"},
+			file:   "doc.pdf",
+			data:   []byte("%PDF-1.1\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF"),
 			code:   http.StatusBadRequest,
 			err:    "UNSUPPORTED_FILE_EXTENSION",
 		},
@@ -326,6 +360,7 @@ func TestUploadBodyLimit(t *testing.T) {
 	body, ctype := multipartBody(t, map[string]string{
 		"folder": "voucher",
 		"name":   "too-big",
+		"width":  "400",
 	}, "photo.jpg", file)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)
@@ -438,6 +473,71 @@ func TestGracefulShutdown(t *testing.T) {
 	}
 }
 
+func TestUploadNarrowerSourceUsesActualWidth(t *testing.T) {
+	store := &recordingStorage{}
+	env := newTestEnv(t, store)
+	file := jpegBytes(t, 200, 120)
+	body, ctype := multipartBody(t, map[string]string{
+		"folder": "profile",
+		"name":   "smallsrc",
+		"width":  "400",
+	}, "photo.jpg", file)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)
+	req.Header.Set("Content-Type", ctype)
+	req.Header.Set("Authorization", "Bearer "+env.token(t, userClaims("USER")))
+	res := httptest.NewRecorder()
+	env.api.Handler().ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", res.Code, res.Body.String())
+	}
+	got := decodeJSON(t, res)
+	payload, _ := got["payload"].(map[string]any)
+	s3URL, _ := payload["s3"].(string)
+	if !strings.Contains(s3URL, "/profile/smallsrc_200.") {
+		t.Fatalf("s3 = %v, want actual width 200", s3URL)
+	}
+	if len(store.uploads) != 1 {
+		t.Fatalf("uploads = %d, want 1", len(store.uploads))
+	}
+}
+
+func TestUploadRejectsMultipleWidths(t *testing.T) {
+	env := newTestEnv(t, &recordingStorage{})
+	file := jpegBytes(t, 8, 8)
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	_ = w.WriteField("folder", "voucher")
+	_ = w.WriteField("name", "abc")
+	_ = w.WriteField("width", "400")
+	_ = w.WriteField("width", "800")
+	fw, err := w.CreateFormFile("file", "p.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/upload", &body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+env.token(t, userClaims("USER")))
+	res := httptest.NewRecorder()
+	env.api.Handler().ServeHTTP(res, req)
+
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 body=%s", res.Code, res.Body.String())
+	}
+	got := decodeJSON(t, res)
+	if got["code"] != "INVALID_WIDTH" {
+		t.Fatalf("code = %v, want INVALID_WIDTH", got["code"])
+	}
+}
+
 func TestUploadRejectsOversizedPixels(t *testing.T) {
 	env := newTestEnv(t, &recordingStorage{}, func(o *APIOpts) {
 		o.MaxPixels = 4
@@ -446,6 +546,7 @@ func TestUploadRejectsOversizedPixels(t *testing.T) {
 	body, ctype := multipartBody(t, map[string]string{
 		"folder": "voucher",
 		"name":   "huge",
+		"width":  "400",
 	}, "photo.jpg", file)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)

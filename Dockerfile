@@ -1,4 +1,4 @@
-FROM golang:1.26.6-bookworm as build
+FROM golang:1.26.6-bookworm AS build
 
 ENV CGO_ENABLED=0
 
@@ -11,7 +11,7 @@ WORKDIR /build
 
 COPY . .
 RUN go mod download
-RUN go build -o storage-server -ldflags="-X main.build=${BUILD} -s -w" cmd/*
+RUN go build -tags nodynamic -o storage-server -ldflags="-X main.build=${BUILD} -s -w" cmd/*
 
 FROM debian:bookworm-slim
 

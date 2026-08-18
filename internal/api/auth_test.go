@@ -25,6 +25,7 @@ func TestUploadAcceptsKnownIdentities(t *testing.T) {
 		body, ctype := multipartBody(t, map[string]string{
 			"folder": "voucher",
 			"name":   "oktoken",
+			"width":  "400",
 		}, "photo.jpg", file)
 		req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)
 		req.Header.Set("Content-Type", ctype)
@@ -47,6 +48,7 @@ func TestUploadAuthFailures(t *testing.T) {
 		b, ctype := multipartBody(t, map[string]string{
 			"folder": "voucher",
 			"name":   "authfail",
+			"width":  "400",
 		}, "photo.jpg", file)
 		return strings.NewReader(b.String()), ctype
 	}
