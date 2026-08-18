@@ -1,0 +1,42 @@
+name: test
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l ./cmd ./internal)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      # The release image builds with -tags nodynamic, which selects the
+      # transpiled libwebp instead of dlopen'ing the host's. Tests pin encoded
+      # sizes, so they must run against the backend that actually ships.
+      - name: Test
+        run: go test -tags nodynamic -race -count=1 ./...
+
+      - name: Verify the release binary is static
+        run: |
+          CGO_ENABLED=0 go build -tags nodynamic -o storage-server ./cmd/
+          file storage-server | tee /dev/stderr | grep -q "statically linked"
