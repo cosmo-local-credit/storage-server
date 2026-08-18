@@ -43,6 +43,14 @@ type (
 
 const apiVersion = "/v1"
 
+// A client uploading over a slow link may take a while to finish sending, so the
+// read deadline is configured; the rest bound how long a connection may sit idle
+// or stall while the response is written.
+const (
+	defaultWriteTimeout = 30 * time.Second
+	defaultIdleTimeout  = 60 * time.Second
+)
+
 func New(o APIOpts) *API {
 	errorProvider := &errorProvider{
 		logg: o.Logg,
@@ -91,9 +99,13 @@ func New(o APIOpts) *API {
 		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 	}))
 
+	// Routes are grouped by what guards them rather than by feature. Everything
+	// under /v1 is authenticated and body-limited by construction, so a route
+	// added there later cannot accidentally be left open. The monitoring group is
+	// deliberately unauthenticated: scrapers reach it without a clc-core token.
 	if o.EnableMetrics {
-		metricsHandler := newMetricshandler(true)
-		router.GET("/metrics", metricsHandler.metrics)
+		monitoring := router.Group("")
+		monitoring.GET("/metrics", newMetricsHandler().metrics)
 	}
 
 	uploadHandler := &uploadHandler{
@@ -106,14 +118,16 @@ func New(o APIOpts) *API {
 		imageOpts:      o.Image,
 		sem:            make(chan struct{}, max(o.NormalizeConcurrency, 1)),
 	}
-	v1 := router.Group(apiVersion)
-	v1.Use(middleware.BodyLimit(o.MaxBodySize))
-	v1.POST("/upload", uploadHandler.upload, api.authMiddleware())
+
+	v1 := router.Group(apiVersion, middleware.BodyLimit(o.MaxBodySize), api.authMiddleware())
+	v1.POST("/upload", uploadHandler.upload)
 
 	api.server = &http.Server{
-		ReadTimeout: o.UploadTimeout,
-		Addr:        o.ListenAddress,
-		Handler:     router,
+		Addr:         o.ListenAddress,
+		Handler:      router,
+		ReadTimeout:  o.UploadTimeout,
+		WriteTimeout: defaultWriteTimeout,
+		IdleTimeout:  defaultIdleTimeout,
 	}
 	return api
 }

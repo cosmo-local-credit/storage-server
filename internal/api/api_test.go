@@ -516,6 +516,21 @@ func TestMetricsRouteEnabled(t *testing.T) {
 	if !strings.Contains(res.Body.String(), "go_") && !strings.Contains(res.Body.String(), "process_") {
 		t.Fatalf("expected prometheus metrics, got %q", res.Body.String())
 	}
+	if got := res.Header().Get("Content-Type"); got != prometheusContentType {
+		t.Fatalf("content type = %q, want %q", got, prometheusContentType)
+	}
+}
+
+func TestMetricsRouteNeedsNoCredential(t *testing.T) {
+	// Scrapers hold no clc-core token; the monitoring group is open on purpose.
+	env := newTestEnv(t, &recordingStorage{})
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	res := httptest.NewRecorder()
+	env.api.Handler().ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 without an Authorization header", res.Code)
+	}
 }
 
 func TestMetricsRouteDisabled(t *testing.T) {
