@@ -22,7 +22,6 @@ import (
 
 type uploadHandler struct {
 	storage        storage.Storage
-	maxBodySize    int64
 	maxPixels      int
 	allowedFolders []string
 	allowedWidths  []int
@@ -33,12 +32,20 @@ type uploadHandler struct {
 
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
+// multipartMemoryLimit caps what the multipart reader keeps in memory. The form
+// values are tiny and the file part is copied into one buffer below either way,
+// so a large limit here would only mean holding the upload twice.
+const multipartMemoryLimit = 1 << 20
+
 func (u *uploadHandler) upload(c *echo.Context) error {
 	ctx := c.Request().Context()
 
-	if err := c.Request().ParseMultipartForm(u.maxBodySize); err != nil {
+	if err := c.Request().ParseMultipartForm(multipartMemoryLimit); err != nil {
 		return err
 	}
+	// Anything above multipartMemoryLimit was spilled to a temp file, which is
+	// only cleaned up on request.
+	defer func() { _ = c.Request().MultipartForm.RemoveAll() }()
 
 	file, _, err := c.Request().FormFile("file")
 	if err != nil {

@@ -11,7 +11,7 @@ WORKDIR /build
 
 COPY . .
 RUN go mod download
-RUN go build -tags nodynamic -o storage-server -ldflags="-X main.build=${BUILD} -s -w" cmd/*
+RUN go build -tags nodynamic -o storage-server -ldflags="-X main.build=${BUILD} -s -w" ./cmd/
 
 FROM debian:bookworm-slim
 
@@ -20,7 +20,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /service
 
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=build /build/* .
+# Only the binary and its config, not the source tree.
+COPY --from=build /build/storage-server .
+COPY --from=build /build/config.toml .
 
 EXPOSE 5003
 

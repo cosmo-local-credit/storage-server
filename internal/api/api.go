@@ -110,7 +110,6 @@ func New(o APIOpts) *API {
 
 	uploadHandler := &uploadHandler{
 		storage:        o.StorageProvider,
-		maxBodySize:    o.MaxBodySize,
 		maxPixels:      o.MaxPixels,
 		allowedFolders: o.AllowedFolders,
 		allowedWidths:  o.AllowedWidths,
