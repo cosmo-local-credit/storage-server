@@ -13,8 +13,8 @@ upload_timeout = "60s"
 allowed_widths           = [400, 800, 1280]
 quality                  = 82
 method                   = 6
-# 12.5 MP admits a 4032x3024 phone photo; each in-flight decode costs roughly
-# four bytes per pixel, so this bounds memory together with normalize_concurrency.
+# 12.5 MP admits a 4032x3024 phone photo. Roughly 4 bytes per pixel in flight, so
+# this and normalize_concurrency together bound memory.
 max_pixels               = 12500000
 materially_smaller_ratio = 0.90
 min_psnr                 = 30

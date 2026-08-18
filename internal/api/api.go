@@ -43,9 +43,8 @@ type (
 
 const apiVersion = "/v1"
 
-// A client uploading over a slow link may take a while to finish sending, so the
-// read deadline is configured; the rest bound how long a connection may sit idle
-// or stall while the response is written.
+// The read deadline is configured, since a slow uploader needs it; these bound
+// idle and stalled-write connections.
 const (
 	defaultWriteTimeout = 30 * time.Second
 	defaultIdleTimeout  = 60 * time.Second
@@ -99,10 +98,8 @@ func New(o APIOpts) *API {
 		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 	}))
 
-	// Routes are grouped by what guards them rather than by feature. Everything
-	// under /v1 is authenticated and body-limited by construction, so a route
-	// added there later cannot accidentally be left open. The monitoring group is
-	// deliberately unauthenticated: scrapers reach it without a clc-core token.
+	// Grouped by guard: anything added under /v1 is authenticated and body-limited
+	// by construction. The monitoring group is deliberately open for scrapers.
 	if o.EnableMetrics {
 		monitoring := router.Group("")
 		monitoring.GET("/metrics", newMetricsHandler().metrics)

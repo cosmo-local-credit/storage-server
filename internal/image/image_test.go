@@ -111,8 +111,7 @@ func TestNormalizeResizedJPEGIsLossyWebP(t *testing.T) {
 }
 
 func TestNormalizeResizedPNGPhotoIsLossy(t *testing.T) {
-	// A photograph in a PNG container must not be forced through lossless
-	// encoding: the container says nothing about the content.
+	// The container says nothing about the content.
 	src := encodePNG(t, photoNRGBA(1600, 1000))
 	got := normalize(t, src, 400)
 	if got.Lossless {
@@ -126,7 +125,7 @@ func TestNormalizeResizedPNGPhotoIsLossy(t *testing.T) {
 }
 
 func TestNormalizeLogoAndTextAreLossless(t *testing.T) {
-	// Both containers must reach the same decision for the same picture.
+	// Both containers must decide the same way for the same picture.
 	for _, tc := range []struct {
 		name string
 		src  []byte
@@ -148,9 +147,8 @@ func TestNormalizeLogoAndTextAreLossless(t *testing.T) {
 }
 
 func TestNormalizeGradientAndFaceStayLossy(t *testing.T) {
-	// Smooth colour ramps and skin tones score badly on PSNR because chroma
-	// subsampling hits them hardest, but lossless is far larger for both. They
-	// must not be mistaken for graphics.
+	// These score badly on PSNR because chroma subsampling hits smooth tones
+	// hardest, but lossless is far larger for both. Not graphics.
 	for _, tc := range []struct {
 		name    string
 		src     []byte
@@ -199,10 +197,8 @@ func TestNormalizeKeepsAlreadyWebP(t *testing.T) {
 }
 
 func TestNormalizeSameSizeJPEGKeepsOriginalBytes(t *testing.T) {
-	// The material-saving guard is driven from the configured ratio rather than
-	// from a fixture that happens to resist WebP, so both of its branches are
-	// reachable. A ratio this strict can never be met, so the source must come
-	// back byte for byte with its own content type and extension.
+	// Driving the guard from the ratio, rather than a fixture that happens to
+	// resist WebP, keeps both branches reachable. This one can never be met.
 	opts := DefaultOpts()
 	opts.MateriallySmallerRatio = 0.001
 
@@ -217,8 +213,7 @@ func TestNormalizeSameSizeJPEGKeepsOriginalBytes(t *testing.T) {
 }
 
 func TestNormalizeSameSizeConvertsWhenMateriallySmaller(t *testing.T) {
-	// The counterpart to the test above: a same-size source that WebP does beat
-	// by more than the ratio must be converted.
+	// The other branch: a same-size source WebP does beat must be converted.
 	src := photoJPEG(t, 600, 400)
 	got := normalize(t, src, 600)
 	if got.Extension != "webp" {
@@ -242,8 +237,7 @@ func TestNormalizeEXIFOrientations(t *testing.T) {
 		if got.Width != wantW || got.Height != wantH {
 			t.Fatalf("orientation %d reported %dx%d, want %dx%d", o, got.Width, got.Height, wantW, wantH)
 		}
-		// The reported size must describe the stored pixels, not just the Result
-		// struct, and the orientation tag must not survive into the object.
+		// The reported size must describe the stored pixels, not just the struct.
 		assertStoredDimensions(t, got)
 		if bytes.Contains(got.Bytes, []byte("Exif")) {
 			t.Fatalf("orientation %d: stored bytes still carry an EXIF block", o)
@@ -252,9 +246,8 @@ func TestNormalizeEXIFOrientations(t *testing.T) {
 }
 
 func TestNormalizeOrientation6RotatesPixels(t *testing.T) {
-	// Orientation 6 means "rotate 90 degrees clockwise". The probe puts a red
-	// marker in the top-left corner, which must land in the top-right corner of
-	// the stored image.
+	// Orientation 6 is a 90 degree clockwise rotation, so the probe's top-left
+	// red marker must end up top-right.
 	raw := encodeJPEG(t, orientationProbe(64, 32), 95)
 	got := normalize(t, jpegWithOrientation(raw, 6), 64)
 	if got.Width >= got.Height {
@@ -276,8 +269,7 @@ func TestNormalizeOrientation6RotatesPixels(t *testing.T) {
 }
 
 func TestNormalizeRotatedSourceIsNeverRetained(t *testing.T) {
-	// A quarter-turn source must be re-encoded even when no resize is needed, or
-	// the stored bytes would disagree with the width in the returned key.
+	// Otherwise the stored bytes disagree with the width in the returned key.
 	raw := encodeJPEG(t, smallFlat(64, 32), 40)
 	src := jpegWithOrientation(raw, 6)
 	got := normalize(t, src, 64)
@@ -291,9 +283,8 @@ func TestNormalizeRotatedSourceIsNeverRetained(t *testing.T) {
 }
 
 func TestMeasurePSNRIgnoresDecoderColourConversion(t *testing.T) {
-	// A lossless round trip is exact, so measuring it must not report a finite
-	// loss. This is the regression guard for measuring through a decoder that
-	// forces every WebP to 4:2:0 YCbCr.
+	// A lossless round trip is exact, so a finite loss here means the measurement
+	// is going through a decoder that forces 4:2:0.
 	img := imaging.Resize(photoNRGBA(320, 240), 160, 0, imaging.Lanczos)
 	encoded, err := encodeWebP(img, DefaultOpts(), true, false)
 	if err != nil {
@@ -318,8 +309,8 @@ func assertMinPSNR(t *testing.T, src []byte, got Result, minimum float64) {
 	}
 }
 
-// assertSizeCeiling pins the encoded size so a dependency upgrade cannot quietly
-// worsen compression. Ceilings sit just above the measured size on purpose.
+// Ceilings sit just above the measured size, so a dependency upgrade cannot
+// quietly worsen compression.
 func assertSizeCeiling(t *testing.T, got Result, ceiling int) {
 	t.Helper()
 	if len(got.Bytes) > ceiling {
@@ -429,9 +420,8 @@ func alphaPNG(t *testing.T, w, h int) []byte {
 	return encodePNG(t, img)
 }
 
-// photoNRGBA is a stand-in for a photograph: smooth tonal drift plus enough
-// fine detail that it compresses like one, so the size ceilings above mean
-// something. The noise comes from a fixed LCG, so fixtures stay deterministic.
+// A stand-in for a photograph: enough fine detail that it compresses like one,
+// so the ceilings above mean something. Fixed LCG keeps fixtures deterministic.
 func photoNRGBA(w, h int) *image.NRGBA {
 	img := image.NewNRGBA(image.Rect(0, 0, w, h))
 	state := uint32(0x9e3779b9)
@@ -463,8 +453,7 @@ func clamp8(v int) uint8 {
 	return uint8(v)
 }
 
-// orientationProbe marks the top-left corner red so a rotation can be detected
-// from the stored pixels rather than inferred from the reported size.
+// The red top-left corner lets a rotation be read from the stored pixels.
 func orientationProbe(w, h int) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	draw.Draw(img, img.Bounds(), &image.Uniform{color.RGBA{200, 200, 200, 255}}, image.Point{}, draw.Src)

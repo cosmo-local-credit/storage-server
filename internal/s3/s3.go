@@ -30,8 +30,7 @@ type (
 
 const bootstrapTimeout = 10 * time.Second
 
-// Keys embed a digest of their own content, so an object never changes under a
-// key and the CDN can be told to keep it indefinitely.
+// Keys embed a content digest, so an object never changes under one.
 const immutableCacheControl = "public, max-age=31536000, immutable"
 
 func New(o S3Opts) (storage.Storage, error) {

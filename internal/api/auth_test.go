@@ -125,8 +125,7 @@ func TestUploadAuthFailures(t *testing.T) {
 }
 
 func TestUploadAcceptsAnyCaseBearerScheme(t *testing.T) {
-	// RFC 7235 makes the auth scheme a case-insensitive token, so a client that
-	// sends it lowercase must not be turned away.
+	// RFC 7235 makes the scheme case-insensitive.
 	store := &recordingStorage{}
 	env := newTestEnv(t, store)
 	file := photoJPEG(t, 64, 48, 1)
@@ -149,8 +148,7 @@ func TestUploadAcceptsAnyCaseBearerScheme(t *testing.T) {
 }
 
 func TestUploadRejectsBeforeParsingBody(t *testing.T) {
-	// An unauthenticated request must cost nothing beyond the header check: the
-	// body here is not valid multipart at all, and a 400 would prove it was read.
+	// The body is not valid multipart, so a 400 would prove it was read.
 	env := newTestEnv(t, &recordingStorage{})
 	req := httptest.NewRequest(http.MethodPost, "/v1/upload", strings.NewReader("not multipart at all"))
 	req.Header.Set("Content-Type", "multipart/form-data; boundary=nope")
@@ -205,8 +203,7 @@ func TestLoadVerifyingKey(t *testing.T) {
 		name string
 		pem  string
 	}{
-		// This service verifies; it must never be handed the signing key, so a
-		// private-key PEM has to be refused rather than quietly used.
+		// This service verifies; it must never be handed the signing key.
 		{"ed25519 private key", pemBlock(t, "PRIVATE KEY", privDER)},
 		{"non-ed25519 public key", pemBlock(t, "PUBLIC KEY", ecDER)},
 		{"empty", ""},
@@ -222,8 +219,7 @@ func TestLoadVerifyingKey(t *testing.T) {
 }
 
 func TestLoadedKeyVerifiesRealTokens(t *testing.T) {
-	// Close the loop: a key that came through PEM must accept a token signed by
-	// its private half and reject one signed by any other.
+	// A PEM-loaded key must accept its own private half and reject any other.
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)

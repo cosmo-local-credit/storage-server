@@ -99,8 +99,7 @@ func main() {
 		lo.Info("shutdown signal received")
 	}
 
-	// Stop trapping signals so a second one can still kill the process while it
-	// is draining.
+	// Untrap signals so a second one can still kill a draining process.
 	stop()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaultGracefulShutdownPeriod)

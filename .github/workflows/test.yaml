@@ -30,9 +30,8 @@ jobs:
             exit 1
           fi
 
-      # The release image builds with -tags nodynamic, which selects the
-      # transpiled libwebp instead of dlopen'ing the host's. Tests pin encoded
-      # sizes, so they must run against the backend that actually ships.
+      # The release image uses -tags nodynamic (transpiled libwebp, not the
+      # host's). Tests pin encoded sizes, so they must match what ships.
       - name: Test
         run: go test -tags nodynamic -race -count=1 ./...
 

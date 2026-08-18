@@ -11,19 +11,13 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
-// bearerPrefix is matched case-insensitively: RFC 7235 defines the auth scheme
-// as a case-insensitive token.
+// Matched case-insensitively; RFC 7235 makes the scheme a case-insensitive token.
 const bearerPrefix = "bearer "
 
-// LoadVerifyingKey parses clc-core's Ed25519 verification key from PEM.
-//
-// It returns the concrete key type rather than crypto.PublicKey, which is an
-// alias for any. Threading that through the API options means a missing or
-// wrong-typed key still compiles and only shows up later as an indistinguishable
-// 401 on every request; resolving it here makes it a startup failure instead.
-//
-// Only the public half belongs in this service, and a private-key PEM is PKCS#8
-// rather than PKIX so it is refused rather than silently accepted.
+// LoadVerifyingKey parses clc-core's Ed25519 verification key from PEM. The
+// concrete return type makes a missing or wrong-typed key a startup failure
+// instead of an indistinguishable 401 per request. Only the public half belongs
+// here, and a private-key PEM is PKCS#8 rather than PKIX, so it is refused.
 func LoadVerifyingKey(publicKeyPem string) (ed25519.PublicKey, error) {
 	parsed, err := jwt.ParseEdPublicKeyFromPEM([]byte(publicKeyPem))
 	if err != nil {
@@ -40,9 +34,8 @@ func LoadVerifyingKey(publicKeyPem string) (ed25519.PublicKey, error) {
 	return key, nil
 }
 
-// tokenClaims covers both clc-core identity shapes. Only the claim names are
-// shared with clc-core; role, service and permission level are read to confirm
-// that a token is one of the known shapes and never to make a decision.
+// tokenClaims covers both clc-core identity shapes. role and service only confirm
+// which shape a token is; they never affect the outcome.
 type tokenClaims struct {
 	jwt.RegisteredClaims
 
@@ -71,10 +64,9 @@ func (a *API) authMiddleware() echo.MiddlewareFunc {
 	}
 }
 
-// authenticate accepts any current clc-core user or service token. Every failure
-// is reported as the same bare error so nothing about the token reaches the
-// client; the reason is recorded as a metric label instead, because logging it
-// alongside the request would risk carrying the credential into the log.
+// authenticate accepts any current clc-core user or service token. Failures
+// collapse to one bare error so nothing about the token reaches the client; the
+// reason goes to a metric label rather than the log, which would carry the token.
 func (a *API) authenticate(header string) error {
 	if len(header) < len(bearerPrefix) || !strings.EqualFold(header[:len(bearerPrefix)], bearerPrefix) {
 		return authFailure("malformed_header")
@@ -97,8 +89,7 @@ func (a *API) authenticate(header string) error {
 		return authFailure(failureReason(err))
 	}
 
-	// WithIssuedAt only validates iat when it is present, and clc-core always
-	// sends one, so require it explicitly.
+	// WithIssuedAt only validates iat when present, so require it.
 	if claims.IssuedAt == nil {
 		return authFailure("missing_iat")
 	}
@@ -117,8 +108,8 @@ func authFailure(reason string) error {
 	return ErrUnauthorized
 }
 
-// failureReason buckets a parse failure into one of a fixed set of labels, so the
-// metric cannot grow a new time series per malformed token.
+// failureReason buckets failures into fixed labels so the metric cannot grow a
+// series per malformed token.
 func failureReason(err error) string {
 	switch {
 	case errors.Is(err, jwt.ErrTokenExpired):

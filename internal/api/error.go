@@ -38,8 +38,7 @@ var (
 	ErrInvalidWidth            = errors.New("invalid width")
 )
 
-// sentinelErrors maps the errors a handler can return onto the wire vocabulary.
-// Every entry is a distinct sentinel, so the order of the table does not matter.
+// Distinct sentinels, so order does not matter.
 var sentinelErrors = []struct {
 	err    error
 	status int
@@ -61,9 +60,7 @@ var sentinelErrors = []struct {
 	{context.Canceled, http.StatusRequestTimeout, "REQUEST_CANCELED"},
 }
 
-// echoStatusCodes maps the statuses Echo raises on its own onto the wire
-// vocabulary. Without an entry here a router-level refusal would be reported as
-// an internal error.
+// Statuses Echo raises itself; without an entry a router refusal reads as a 500.
 var echoStatusCodes = map[int]string{
 	http.StatusBadRequest:            "BAD_REQUEST",
 	http.StatusNotFound:              "NOT_FOUND",
@@ -99,8 +96,7 @@ func (e *errorProvider) from(err error) Error {
 		}
 	}
 
-	// MaxBytesError carries the limit rather than being a sentinel, so it needs
-	// its own check.
+	// Carries the limit, so it is not a sentinel.
 	var maxBytes *http.MaxBytesError
 	if errors.As(err, &maxBytes) {
 		return newError(http.StatusRequestEntityTooLarge, "FILE_SIZE_LIMIT_EXCEEDED")

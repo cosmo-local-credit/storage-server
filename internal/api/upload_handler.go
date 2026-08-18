@@ -32,9 +32,8 @@ type uploadHandler struct {
 
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
-// multipartMemoryLimit caps what the multipart reader keeps in memory. The form
-// values are tiny and the file part is copied into one buffer below either way,
-// so a large limit here would only mean holding the upload twice.
+// Parts above this spill to disk. The file is copied into one buffer below
+// anyway, so a larger limit would just hold the upload twice.
 const multipartMemoryLimit = 1 << 20
 
 func (u *uploadHandler) upload(c *echo.Context) error {
@@ -43,8 +42,7 @@ func (u *uploadHandler) upload(c *echo.Context) error {
 	if err := c.Request().ParseMultipartForm(multipartMemoryLimit); err != nil {
 		return err
 	}
-	// Anything above multipartMemoryLimit was spilled to a temp file, which is
-	// only cleaned up on request.
+	// Spilled temp files are only cleaned up on request.
 	defer func() { _ = c.Request().MultipartForm.RemoveAll() }()
 
 	file, _, err := c.Request().FormFile("file")
@@ -80,9 +78,7 @@ func (u *uploadHandler) upload(c *echo.Context) error {
 	}
 	src := buffer.Bytes()
 
-	// Validate the container and the pixel count from the header before taking a
-	// slot, so a junk or oversized upload is refused without waiting behind the
-	// images that are actually being encoded.
+	// Refuse junk and oversized uploads before queueing for a slot.
 	info, err := img.Inspect(src, u.maxPixels)
 	if err != nil {
 		return imageError(err)
@@ -113,15 +109,8 @@ func (u *uploadHandler) upload(c *echo.Context) error {
 	})
 }
 
-// normalize encodes one image while holding a slot from the concurrency gate.
-//
-// Normalize allocates on the order of the source's pixel count, so the gate
-// bounds memory rather than CPU and is sized independently of core count. The
-// slot is taken with the request context in play so a burst does not queue
-// behind clients that have already gone away, and released with defer so a panic
-// recovered by the router cannot retire a slot for the lifetime of the process.
-// It is given up before the upload starts; waiting on object storage does not
-// need a decode budget.
+// normalize holds a concurrency slot for the encode. img.Normalize allocates in
+// proportion to the source's pixel count, so the gate bounds memory, not CPU.
 func (u *uploadHandler) normalize(ctx context.Context, src []byte, info img.Info, width int) (img.Result, error) {
 	select {
 	case u.sem <- struct{}{}:
@@ -139,11 +128,9 @@ func (u *uploadHandler) normalize(ctx context.Context, src []byte, info img.Info
 	return result, nil
 }
 
-// contentTag is a short digest of the bytes about to be stored. Including it in
-// the key makes the key a function of the content: re-uploading under a name that
-// already exists publishes a new URL instead of replacing an object that CDN
-// caches have been told is immutable. Eight hex digits are ample here because a
-// collision would also have to land on the same folder, name and width.
+// contentTag makes the key a function of the content, so re-uploading under an
+// existing name publishes a new URL instead of replacing an immutably cached
+// object. Eight digits suffice: a collision must also match folder, name and width.
 func contentTag(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:4])

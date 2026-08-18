@@ -136,9 +136,8 @@ func serviceClaims() tokenClaims {
 	}
 }
 
-// photoJPEG builds a photograph-like fixture. seed varies the pixels so two
-// uploads can be made deliberately different; a solid frame would compress to
-// almost nothing and would not exercise the encoder at all.
+// seed varies the pixels so two uploads can be made deliberately different. A
+// solid frame would compress to nothing and never exercise the encoder.
 func photoJPEG(t *testing.T, w, h, seed int) []byte {
 	t.Helper()
 	img := image.NewNRGBA(image.Rect(0, 0, w, h))
@@ -254,8 +253,7 @@ func TestUploadSuccessJSON(t *testing.T) {
 	}
 }
 
-// keyPattern is the shape the API promises: name, actual width, content tag and
-// an extension that matches the stored bytes.
+// The shape the API promises: name, actual width, content tag, real extension.
 var keyPattern = regexp.MustCompile(
 	`^https://content\.sarafu\.network/(voucher|profile)/[A-Za-z0-9_-]{1,64}_\d+_[0-9a-f]{8}\.(webp|jpg|png)$`)
 
@@ -290,13 +288,11 @@ func TestUploadKeyIsDerivedFromContent(t *testing.T) {
 	again := upload(photoJPEG(t, 800, 500, 1))
 	other := upload(photoJPEG(t, 800, 500, 2))
 
-	// The same bytes under the same name must resolve to the same object, so a
-	// retry does not litter the bucket.
+	// A retry must not litter the bucket.
 	if first != again {
 		t.Fatalf("identical uploads produced different keys:\n  %s\n  %s", first, again)
 	}
-	// Different bytes under the same name must not collide, or an immutable CDN
-	// entry would keep serving the previous image.
+	// Otherwise an immutable CDN entry keeps serving the previous image.
 	if first == other {
 		t.Fatalf("different images shared a key: %s", first)
 	}
@@ -522,7 +518,7 @@ func TestMetricsRouteEnabled(t *testing.T) {
 }
 
 func TestMetricsRouteNeedsNoCredential(t *testing.T) {
-	// Scrapers hold no clc-core token; the monitoring group is open on purpose.
+	// Scrapers hold no clc-core token.
 	env := newTestEnv(t, &recordingStorage{})
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	res := httptest.NewRecorder()
@@ -667,8 +663,7 @@ func TestUploadRejectsOversizedPixels(t *testing.T) {
 }
 
 func TestUploadConcurrencyGateReleasesSlots(t *testing.T) {
-	// A single slot, more requests than slots, and every one must still complete:
-	// a slot that is not returned would hang the rest of the run.
+	// One slot, more requests than slots: a slot never returned hangs the rest.
 	store := &recordingStorage{}
 	env := newTestEnv(t, store, func(o *APIOpts) {
 		o.NormalizeConcurrency = 1
@@ -718,8 +713,8 @@ func TestUploadConcurrencyGateReleasesSlots(t *testing.T) {
 }
 
 func TestNormalizeGivesUpWhenRequestIsAbandoned(t *testing.T) {
-	// The gate is filled by hand so the only ready case is the dead context;
-	// racing a real upload against it would leave the outcome to the scheduler.
+	// Filling the gate by hand leaves the dead context as the only ready case;
+	// racing a real upload would hand the outcome to the scheduler.
 	u := &uploadHandler{sem: make(chan struct{}, 1), imageOpts: img.DefaultOpts()}
 	u.sem <- struct{}{}
 
