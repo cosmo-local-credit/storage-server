@@ -4,21 +4,17 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"image"
-	_ "image/jpeg"
-	_ "image/png"
 	"io"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
 	img "github.com/grassrootseconomics/storage-server/internal/image"
 	"github.com/grassrootseconomics/storage-server/internal/storage"
-	"github.com/h2non/filetype"
 	"github.com/labstack/echo/v5"
-	_ "golang.org/x/image/webp"
 )
 
 type uploadHandler struct {
@@ -51,7 +47,7 @@ func (u *uploadHandler) upload(c *echo.Context) error {
 	if folder == "" {
 		return ErrFormFolderKeyNotFound
 	}
-	if !isAllowedFolder(folder, u.allowedFolders) {
+	if !slices.Contains(u.allowedFolders, folder) {
 		return ErrInvalidFolder
 	}
 
@@ -73,35 +69,24 @@ func (u *uploadHandler) upload(c *echo.Context) error {
 		return err
 	}
 	src := buffer.Bytes()
-	kind, err := filetype.Match(src)
+
+	// Validate the container and the pixel count from the header before taking a
+	// slot, so a junk or oversized upload is refused without waiting behind the
+	// images that are actually being encoded.
+	info, err := img.Inspect(src, u.maxPixels)
 	if err != nil {
-		return err
-	}
-	if kind.Extension != "jpg" && kind.Extension != "png" && kind.Extension != "webp" {
-		return ErrNotImageFile
-	}
-	if err := rejectOversized(src, u.maxPixels); err != nil {
-		return err
+		return imageError(err)
 	}
 
 	u.sem <- struct{}{}
 	start := time.Now()
-	result, err := img.Normalize(src, requestedWidth, u.imageOpts)
+	result, err := img.Normalize(src, info, requestedWidth, u.imageOpts)
 	<-u.sem
 	if err != nil {
-		if errors.Is(err, img.ErrTooManyPixels) {
-			return ErrImageTooLarge
-		}
-		if errors.Is(err, img.ErrInvalidWidth) {
-			return ErrInvalidWidth
-		}
-		if errors.Is(err, img.ErrUnsupported) {
-			return ErrNotImageFile
-		}
-		return err
+		return imageError(err)
 	}
 
-	recordUploadMetrics(kind.Extension, result, requestedWidth, len(src), start)
+	recordUploadMetrics(info.Format, result, requestedWidth, len(src), start)
 
 	filePath := fmt.Sprintf("%s_%d.%s", fileName, result.Width, result.Extension)
 	if err := u.storage.Upload(
@@ -123,6 +108,20 @@ func (u *uploadHandler) upload(c *echo.Context) error {
 	})
 }
 
+// imageError maps the image package's sentinels onto the API's error vocabulary.
+func imageError(err error) error {
+	switch {
+	case errors.Is(err, img.ErrTooManyPixels):
+		return ErrImageTooLarge
+	case errors.Is(err, img.ErrInvalidWidth):
+		return ErrInvalidWidth
+	case errors.Is(err, img.ErrUnsupported):
+		return ErrNotImageFile
+	default:
+		return err
+	}
+}
+
 func parseWidth(values []string, allowed []int) (int, error) {
 	if len(values) != 1 {
 		return 0, ErrInvalidWidth
@@ -131,26 +130,10 @@ func parseWidth(values []string, allowed []int) (int, error) {
 	if err != nil {
 		return 0, ErrInvalidWidth
 	}
-	for _, w := range allowed {
-		if w == width {
-			return width, nil
-		}
+	if !slices.Contains(allowed, width) {
+		return 0, ErrInvalidWidth
 	}
-	return 0, ErrInvalidWidth
-}
-
-func rejectOversized(src []byte, maxPixels int) error {
-	if maxPixels <= 0 {
-		return nil
-	}
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(src))
-	if err != nil {
-		return err
-	}
-	if int64(cfg.Width)*int64(cfg.Height) > int64(maxPixels) {
-		return ErrImageTooLarge
-	}
-	return nil
+	return width, nil
 }
 
 func recordUploadMetrics(source string, result img.Result, requested, bytesIn int, start time.Time) {
@@ -163,7 +146,7 @@ func recordUploadMetrics(source string, result img.Result, requested, bytesIn in
 		requested, result.Width,
 	)).Inc()
 	metrics.GetOrCreateCounter(fmt.Sprintf(
-		`storage_upload_format_total{source=%q,output=%q}`,
-		source, result.Extension,
+		`storage_upload_format_total{source=%q,output=%q,lossless="%t"}`,
+		source, result.Extension, result.Lossless,
 	)).Inc()
 }

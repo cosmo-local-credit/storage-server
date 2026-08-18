@@ -81,8 +81,8 @@ func main() {
 		Image: image.Opts{
 			Quality:                ko.MustInt("image.quality"),
 			Method:                 ko.MustInt("image.method"),
-			MaxPixels:              ko.MustInt("image.max_pixels"),
 			MateriallySmallerRatio: ko.MustFloat64("image.materially_smaller_ratio"),
+			MinPSNR:                ko.MustFloat64("image.min_psnr"),
 		},
 		VerifyingKey:    verifyingKey,
 		StorageProvider: s3Uploader,

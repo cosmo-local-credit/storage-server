@@ -61,12 +61,3 @@ func (a *API) authenticate(header string) error {
 	}
 	return nil
 }
-
-func isAllowedFolder(folder string, allowed []string) bool {
-	for _, f := range allowed {
-		if f == folder {
-			return true
-		}
-	}
-	return false
-}
