@@ -3,6 +3,8 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"image"
@@ -17,8 +19,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/grassrootseconomics/storage-server/internal/storage"
 )
+
+type testEnv struct {
+	api  *API
+	priv ed25519.PrivateKey
+}
 
 type storedObject struct {
 	name        string
@@ -63,20 +71,61 @@ func (s *recordingStorage) last() storedObject {
 	return s.uploads[len(s.uploads)-1]
 }
 
-func testAPI(store storage.Storage, overrides ...func(*APIOpts)) *API {
+func newTestEnv(t *testing.T, store storage.Storage, overrides ...func(*APIOpts)) *testEnv {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 	o := APIOpts{
 		EnableMetrics:   true,
 		ListenAddress:   "127.0.0.1:0",
 		MaxBodySize:     1 << 20,
+		MaxPixels:       50_000_000,
 		CORS:            []string{"https://sarafu.network", "http://localhost:3000"},
+		AllowedFolders:  []string{"voucher", "profile"},
 		UploadTimeout:   5 * time.Second,
+		ClockSkew:       30 * time.Second,
+		VerifyingKey:    pub,
 		StorageProvider: store,
 		Logg:            slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	for _, fn := range overrides {
 		fn(&o)
 	}
-	return New(o)
+	return &testEnv{api: New(o), priv: priv}
+}
+
+func (e *testEnv) token(t *testing.T, claims jwt.Claims) string {
+	t.Helper()
+	signed, err := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims).SignedString(e.priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signed
+}
+
+func userClaims(role string) tokenClaims {
+	return tokenClaims{
+		UserID:          1,
+		EthereumAddress: "0x1111111111111111111111111111111111111111",
+		Role:            role,
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+	}
+}
+
+func serviceClaims() tokenClaims {
+	return tokenClaims{
+		Service:   true,
+		PublicKey: "0x0000000000000000000000000000000000000000",
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+	}
 }
 
 func jpegBytes(t *testing.T, w, h int) []byte {
@@ -124,7 +173,7 @@ func decodeJSON(t *testing.T, res *httptest.ResponseRecorder) map[string]any {
 
 func TestUploadSuccessJSON(t *testing.T) {
 	store := &recordingStorage{}
-	api := testAPI(store)
+	env := newTestEnv(t, store)
 	file := jpegBytes(t, 8, 8)
 	body, ctype := multipartBody(t, map[string]string{
 		"folder": "voucher",
@@ -133,8 +182,9 @@ func TestUploadSuccessJSON(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)
 	req.Header.Set("Content-Type", ctype)
+	req.Header.Set("Authorization", "Bearer "+env.token(t, userClaims("USER")))
 	res := httptest.NewRecorder()
-	api.Handler().ServeHTTP(res, req)
+	env.api.Handler().ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 body=%s", res.Code, res.Body.String())
@@ -184,14 +234,30 @@ func TestUploadErrorEnvelopes(t *testing.T) {
 			err:  "MISSING_FOLDER",
 		},
 		{
-			name: "missing name uses folder error",
+			name: "missing name",
 			fields: map[string]string{
 				"folder": "voucher",
 			},
 			file: "p.jpg",
 			data: file,
 			code: http.StatusBadRequest,
-			err:  "MISSING_FOLDER",
+			err:  "MISSING_NAME",
+		},
+		{
+			name:   "invalid folder",
+			fields: map[string]string{"folder": "secret", "name": "abc"},
+			file:   "p.jpg",
+			data:   file,
+			code:   http.StatusBadRequest,
+			err:    "INVALID_FOLDER",
+		},
+		{
+			name:   "invalid name",
+			fields: map[string]string{"folder": "voucher", "name": "../etc/passwd"},
+			file:   "p.jpg",
+			data:   file,
+			code:   http.StatusBadRequest,
+			err:    "INVALID_NAME",
 		},
 		{
 			name:   "missing file",
@@ -218,7 +284,7 @@ func TestUploadErrorEnvelopes(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			api := testAPI(&recordingStorage{})
+			env := newTestEnv(t, &recordingStorage{})
 			var (
 				body  io.Reader
 				ctype string
@@ -231,8 +297,9 @@ func TestUploadErrorEnvelopes(t *testing.T) {
 			}
 			req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)
 			req.Header.Set("Content-Type", ctype)
+			req.Header.Set("Authorization", "Bearer "+env.token(t, userClaims("USER")))
 			res := httptest.NewRecorder()
-			api.Handler().ServeHTTP(res, req)
+			env.api.Handler().ServeHTTP(res, req)
 
 			if res.Code != tc.code {
 				t.Fatalf("status = %d, want %d body=%s", res.Code, tc.code, res.Body.String())
@@ -249,7 +316,7 @@ func TestUploadErrorEnvelopes(t *testing.T) {
 }
 
 func TestUploadBodyLimit(t *testing.T) {
-	api := testAPI(&recordingStorage{}, func(o *APIOpts) {
+	env := newTestEnv(t, &recordingStorage{}, func(o *APIOpts) {
 		o.MaxBodySize = 256
 	})
 	file := jpegBytes(t, 64, 64)
@@ -263,8 +330,9 @@ func TestUploadBodyLimit(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)
 	req.Header.Set("Content-Type", ctype)
+	req.Header.Set("Authorization", "Bearer "+env.token(t, userClaims("USER")))
 	res := httptest.NewRecorder()
-	api.Handler().ServeHTTP(res, req)
+	env.api.Handler().ServeHTTP(res, req)
 
 	if res.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413 body=%s", res.Code, res.Body.String())
@@ -276,13 +344,13 @@ func TestUploadBodyLimit(t *testing.T) {
 }
 
 func TestCORSPreflightConfiguredOrigin(t *testing.T) {
-	api := testAPI(&recordingStorage{})
+	env := newTestEnv(t, &recordingStorage{})
 	req := httptest.NewRequest(http.MethodOptions, "/v1/upload", nil)
 	req.Header.Set("Origin", "https://sarafu.network")
 	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
-	req.Header.Set("Access-Control-Request-Headers", "content-type")
+	req.Header.Set("Access-Control-Request-Headers", "authorization,content-type")
 	res := httptest.NewRecorder()
-	api.Handler().ServeHTTP(res, req)
+	env.api.Handler().ServeHTTP(res, req)
 
 	if got := res.Header().Get("Access-Control-Allow-Origin"); got != "https://sarafu.network" {
 		t.Fatalf("allow origin = %q", got)
@@ -294,16 +362,20 @@ func TestCORSPreflightConfiguredOrigin(t *testing.T) {
 	if !strings.Contains(allowMethods, http.MethodPost) {
 		t.Fatalf("allow methods = %q, want POST", allowMethods)
 	}
+	allowHeaders := strings.ToLower(res.Header().Get("Access-Control-Allow-Headers"))
+	if !strings.Contains(allowHeaders, "authorization") || !strings.Contains(allowHeaders, "content-type") {
+		t.Fatalf("allow headers = %q", allowHeaders)
+	}
 }
 
 func TestCORSPreflightRejectsUnknownOrigin(t *testing.T) {
-	api := testAPI(&recordingStorage{})
+	env := newTestEnv(t, &recordingStorage{})
 	req := httptest.NewRequest(http.MethodOptions, "/v1/upload", nil)
 	req.Header.Set("Origin", "https://evil.example")
 	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
-	req.Header.Set("Access-Control-Request-Headers", "content-type")
+	req.Header.Set("Access-Control-Request-Headers", "authorization,content-type")
 	res := httptest.NewRecorder()
-	api.Handler().ServeHTTP(res, req)
+	env.api.Handler().ServeHTTP(res, req)
 
 	if got := res.Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Fatalf("allow origin = %q, want empty", got)
@@ -311,10 +383,10 @@ func TestCORSPreflightRejectsUnknownOrigin(t *testing.T) {
 }
 
 func TestMetricsRouteEnabled(t *testing.T) {
-	api := testAPI(&recordingStorage{})
+	env := newTestEnv(t, &recordingStorage{})
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	res := httptest.NewRecorder()
-	api.Handler().ServeHTTP(res, req)
+	env.api.Handler().ServeHTTP(res, req)
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", res.Code)
@@ -325,26 +397,23 @@ func TestMetricsRouteEnabled(t *testing.T) {
 }
 
 func TestMetricsRouteDisabled(t *testing.T) {
-	api := testAPI(&recordingStorage{}, func(o *APIOpts) {
+	env := newTestEnv(t, &recordingStorage{}, func(o *APIOpts) {
 		o.EnableMetrics = false
 	})
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	res := httptest.NewRecorder()
-	api.Handler().ServeHTTP(res, req)
+	env.api.Handler().ServeHTTP(res, req)
 
-	if res.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", res.Code)
-	}
-	if res.Body.Len() != 0 {
-		t.Fatalf("disabled metrics wrote %q", res.Body.String())
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 body=%s", res.Code, res.Body.String())
 	}
 }
 
 func TestGracefulShutdown(t *testing.T) {
-	api := testAPI(&recordingStorage{})
+	env := newTestEnv(t, &recordingStorage{})
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- api.Start()
+		errCh <- env.api.Start()
 	}()
 
 	select {
@@ -355,7 +424,7 @@ func TestGracefulShutdown(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := api.Stop(ctx); err != nil {
+	if err := env.api.Stop(ctx); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 
@@ -366,5 +435,30 @@ func TestGracefulShutdown(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("server did not shut down")
+	}
+}
+
+func TestUploadRejectsOversizedPixels(t *testing.T) {
+	env := newTestEnv(t, &recordingStorage{}, func(o *APIOpts) {
+		o.MaxPixels = 4
+	})
+	file := jpegBytes(t, 8, 8)
+	body, ctype := multipartBody(t, map[string]string{
+		"folder": "voucher",
+		"name":   "huge",
+	}, "photo.jpg", file)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)
+	req.Header.Set("Content-Type", ctype)
+	req.Header.Set("Authorization", "Bearer "+env.token(t, userClaims("USER")))
+	res := httptest.NewRecorder()
+	env.api.Handler().ServeHTTP(res, req)
+
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 body=%s", res.Code, res.Body.String())
+	}
+	got := decodeJSON(t, res)
+	if got["code"] != "IMAGE_TOO_LARGE" {
+		t.Fatalf("code = %v, want IMAGE_TOO_LARGE", got["code"])
 	}
 }

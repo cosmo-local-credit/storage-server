@@ -60,7 +60,8 @@ func New(o S3Opts) (storage.Storage, error) {
 
 func (s *S3) Upload(ctx context.Context, objectName string, path string, ioReader io.Reader, objectSize int64, contentType string) error {
 	info, err := s.client.PutObject(ctx, s.bucketName, fmt.Sprintf("%s/%s", path, objectName), ioReader, objectSize, minio.PutObjectOptions{
-		ContentType: contentType,
+		ContentType:  contentType,
+		CacheControl: "public, max-age=31536000, immutable",
 	})
 	if err != nil {
 		return err

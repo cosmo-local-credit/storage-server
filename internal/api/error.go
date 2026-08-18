@@ -30,6 +30,10 @@ var (
 	ErrFormFolderKeyNotFound   = errors.New("form folder key not found")
 	ErrFormFileNameKeyNotFound = errors.New("form file name key not found")
 	ErrNotImageFile            = errors.New("uploaded file is not an image")
+	ErrUnauthorized            = errors.New("unauthorized")
+	ErrInvalidFolder           = errors.New("invalid folder")
+	ErrInvalidName             = errors.New("invalid name")
+	ErrImageTooLarge           = errors.New("image exceeds max pixels")
 )
 
 func (e *httpError) HTTPStatusCode() int {
@@ -59,8 +63,13 @@ func (e *errorProvider) from(err error) Error {
 		return newError(http.StatusRequestEntityTooLarge, "FILE_SIZE_LIMIT_EXCEEDED")
 	}
 	var sc echo.HTTPStatusCoder
-	if errors.As(err, &sc) && sc.StatusCode() == http.StatusRequestEntityTooLarge {
-		return newError(http.StatusRequestEntityTooLarge, "FILE_SIZE_LIMIT_EXCEEDED")
+	if errors.As(err, &sc) {
+		switch sc.StatusCode() {
+		case http.StatusRequestEntityTooLarge:
+			return newError(http.StatusRequestEntityTooLarge, "FILE_SIZE_LIMIT_EXCEEDED")
+		case http.StatusNotFound:
+			return newError(http.StatusNotFound, "NOT_FOUND")
+		}
 	}
 
 	if errors.Is(err, io.EOF) {
@@ -78,8 +87,23 @@ func (e *errorProvider) from(err error) Error {
 	if errors.Is(err, ErrFormFolderKeyNotFound) {
 		return newError(http.StatusBadRequest, "MISSING_FOLDER")
 	}
+	if errors.Is(err, ErrFormFileNameKeyNotFound) {
+		return newError(http.StatusBadRequest, "MISSING_NAME")
+	}
+	if errors.Is(err, ErrInvalidFolder) {
+		return newError(http.StatusBadRequest, "INVALID_FOLDER")
+	}
+	if errors.Is(err, ErrInvalidName) {
+		return newError(http.StatusBadRequest, "INVALID_NAME")
+	}
+	if errors.Is(err, ErrImageTooLarge) {
+		return newError(http.StatusBadRequest, "IMAGE_TOO_LARGE")
+	}
 	if errors.Is(err, ErrNotImageFile) {
 		return newError(http.StatusBadRequest, "UNSUPPORTED_FILE_EXTENSION")
+	}
+	if errors.Is(err, ErrUnauthorized) {
+		return newError(http.StatusUnauthorized, "UNAUTHORIZED")
 	}
 
 	e.logg.Error("internal server error", "error", err)

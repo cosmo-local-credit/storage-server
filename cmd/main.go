@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/grassrootseconomics/storage-server/internal/api"
 	"github.com/grassrootseconomics/storage-server/internal/s3"
 	"github.com/knadh/koanf/v2"
@@ -59,12 +60,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	verifyingKey, err := jwt.ParseEdPublicKeyFromPEM([]byte(ko.MustString("auth.public_key")))
+	if err != nil {
+		lo.Error("could not parse auth public key", "error", err)
+		os.Exit(1)
+	}
+
 	apiServer := api.New(api.APIOpts{
 		EnableMetrics:   ko.Bool("metrics.enable"),
 		ListenAddress:   ko.MustString("api.address"),
 		MaxBodySize:     ko.MustInt64("api.max_body_size") << 20,
+		MaxPixels:       ko.MustInt("image.max_pixels"),
 		CORS:            ko.MustStrings("api.origin"),
+		AllowedFolders:  ko.MustStrings("api.allowed_folders"),
 		UploadTimeout:   5 * time.Second,
+		ClockSkew:       ko.MustDuration("auth.clock_skew"),
+		VerifyingKey:    verifyingKey,
 		StorageProvider: s3Uploader,
 		Logg:            lo,
 	})

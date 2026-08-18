@@ -5,6 +5,18 @@ enable = true
 address = ":5003"
 max_body_size = 5
 origin = ["https://sarafu.network", "https://preview.sarafu.network", "http://localhost:3000"]
+allowed_folders = ["voucher", "profile"]
+
+[image]
+max_pixels = 50000000
+
+[auth]
+# Ed25519 public key matching clc-core's signing key. Never configure its private key.
+public_key = """
+-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAd5osN95MX4qOplzCcXvWggSe79YKbJLJbQWEaL0sRnE=
+-----END PUBLIC KEY-----"""
+clock_skew = "30s"
 
 [s3]
 endpoint = ""

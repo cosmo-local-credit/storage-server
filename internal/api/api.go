@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto"
 	"log/slog"
 	"net/http"
 	"time"
@@ -16,8 +17,12 @@ type (
 		EnableMetrics   bool
 		ListenAddress   string
 		MaxBodySize     int64
+		MaxPixels       int
 		CORS            []string
+		AllowedFolders  []string
 		UploadTimeout   time.Duration
+		ClockSkew       time.Duration
+		VerifyingKey    crypto.PublicKey
 		StorageProvider storage.Storage
 		Logg            *slog.Logger
 	}
@@ -25,6 +30,8 @@ type (
 	API struct {
 		logg          *slog.Logger
 		errorProvider *errorProvider
+		verifyingKey  crypto.PublicKey
+		clockSkew     time.Duration
 		server        *http.Server
 	}
 )
@@ -42,6 +49,8 @@ func New(o APIOpts) *API {
 	api := &API{
 		logg:          o.Logg,
 		errorProvider: errorProvider,
+		verifyingKey:  o.VerifyingKey,
+		clockSkew:     o.ClockSkew,
 	}
 
 	router := echo.New()
@@ -77,19 +86,23 @@ func New(o APIOpts) *API {
 		AllowOrigins:     o.CORS,
 		AllowCredentials: true,
 		AllowMethods:     []string{http.MethodGet, http.MethodHead, http.MethodPost},
-		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderXRequestedWith},
+		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 	}))
 
-	metricsHandler := newMetricshandler(o.EnableMetrics)
-	router.GET("/metrics", metricsHandler.metrics)
+	if o.EnableMetrics {
+		metricsHandler := newMetricshandler(true)
+		router.GET("/metrics", metricsHandler.metrics)
+	}
 
 	uploadHandler := &uploadHandler{
-		storage:     o.StorageProvider,
-		maxBodySize: o.MaxBodySize,
+		storage:        o.StorageProvider,
+		maxBodySize:    o.MaxBodySize,
+		maxPixels:      o.MaxPixels,
+		allowedFolders: o.AllowedFolders,
 	}
 	v1 := router.Group(apiVersion)
 	v1.Use(middleware.BodyLimit(o.MaxBodySize))
-	v1.POST("/upload", uploadHandler.upload)
+	v1.POST("/upload", uploadHandler.upload, api.authMiddleware())
 
 	api.server = &http.Server{
 		ReadTimeout: o.UploadTimeout,
