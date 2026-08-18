@@ -1,10 +1,9 @@
 module github.com/grassrootseconomics/storage-server
 
-go 1.22.3
+go 1.26.6
 
 require (
 	github.com/VictoriaMetrics/metrics v1.33.1
-	github.com/google/uuid v1.6.0
 	github.com/h2non/filetype v1.1.3
 	github.com/kamikazechaser/common v0.2.0
 	github.com/knadh/koanf/parsers/toml v0.1.0
@@ -24,6 +23,7 @@ require (
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.0.0-alpha.1 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.17.6 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.6 // indirect
 	github.com/knadh/koanf/maps v0.1.1 // indirect

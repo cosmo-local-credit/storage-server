@@ -1,4 +1,4 @@
-FROM golang:1.22.3-bookworm as build
+FROM golang:1.26.6-bookworm as build
 
 ENV CGO_ENABLED=0
 
