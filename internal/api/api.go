@@ -77,6 +77,10 @@ func New(o APIOpts) *API {
 	}
 }
 
+func (a *API) Handler() http.Handler {
+	return a.server.Handler
+}
+
 func (a *API) Start() error {
 	a.logg.Info("starting API HTTP server", "listen_address", a.server.Addr)
 	return a.server.ListenAndServe()
