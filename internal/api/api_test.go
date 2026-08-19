@@ -22,9 +22,9 @@ import (
 	"testing"
 	"time"
 
+	img "github.com/cosmo-local-credit/storage-server/internal/image"
+	"github.com/cosmo-local-credit/storage-server/internal/storage"
 	"github.com/golang-jwt/jwt/v5"
-	img "github.com/grassrootseconomics/storage-server/internal/image"
-	"github.com/grassrootseconomics/storage-server/internal/storage"
 )
 
 type testEnv struct {

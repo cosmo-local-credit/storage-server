@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/grassrootseconomics/storage-server/internal/api"
-	"github.com/grassrootseconomics/storage-server/internal/image"
-	"github.com/grassrootseconomics/storage-server/internal/s3"
+	"github.com/cosmo-local-credit/storage-server/internal/api"
+	"github.com/cosmo-local-credit/storage-server/internal/image"
+	"github.com/cosmo-local-credit/storage-server/internal/s3"
 	"github.com/knadh/koanf/v2"
 )
 

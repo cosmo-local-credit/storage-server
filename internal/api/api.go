@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/grassrootseconomics/storage-server/internal/image"
-	"github.com/grassrootseconomics/storage-server/internal/storage"
+	"github.com/cosmo-local-credit/storage-server/internal/image"
+	"github.com/cosmo-local-credit/storage-server/internal/storage"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 )

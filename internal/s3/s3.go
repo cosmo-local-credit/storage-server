@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/grassrootseconomics/storage-server/internal/storage"
+	"github.com/cosmo-local-credit/storage-server/internal/storage"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )

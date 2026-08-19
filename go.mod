@@ -1,4 +1,4 @@
-module github.com/grassrootseconomics/storage-server
+module github.com/cosmo-local-credit/storage-server
 
 go 1.26.6
 

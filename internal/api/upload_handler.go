@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
-	img "github.com/grassrootseconomics/storage-server/internal/image"
-	"github.com/grassrootseconomics/storage-server/internal/storage"
+	img "github.com/cosmo-local-credit/storage-server/internal/image"
+	"github.com/cosmo-local-credit/storage-server/internal/storage"
 	"github.com/labstack/echo/v5"
 )
 
