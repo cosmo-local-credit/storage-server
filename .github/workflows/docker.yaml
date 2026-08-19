@@ -52,5 +52,5 @@ jobs:
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
           tags: |
-            ghcr.io/grassrootseconomics/storage-server:latest
-            ghcr.io/grassrootseconomics/storage-server:${{ env.RELEASE_TAG }}
+            ghcr.io/cosmo-local-credit/storage-server:latest
+            ghcr.io/cosmo-local-credit/storage-server:${{ env.RELEASE_TAG }}

@@ -1,6 +1,6 @@
 # storage-server
 
-![GitHub Tag](https://img.shields.io/github/v/tag/grassrootseconomics/storage-server)
+![GitHub Tag](https://img.shields.io/github/v/tag/cosmo-local-credit/storage-server)
 
 ## Getting Started
 
@@ -18,7 +18,7 @@ We provide pre-built images for `linux/amd64`. See the packages tab on Github.
 If you are on any other platform:
 
 ```bash
-git clone https://github.com/grassrootseconomics/storage-server.git
+git clone https://github.com/cosmo-local-credit/storage-server.git
 cd storage-server
 docker buildx build --build-arg BUILD=$(git rev-parse --short HEAD) --tag storage-server:$(git rev-parse --short HEAD) --tag storage-server:latest .
 docker images
