@@ -4,16 +4,15 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/grassrootseconomics/storage-server/internal/api"
+	"github.com/grassrootseconomics/storage-server/internal/image"
 	"github.com/grassrootseconomics/storage-server/internal/s3"
 	"github.com/knadh/koanf/v2"
 )
@@ -23,9 +22,7 @@ const defaultGracefulShutdownPeriod = time.Second * 5
 var (
 	build = "dev"
 
-	confFlag             string
-	migrationsFolderFlag string
-	queriesFlag          string
+	confFlag string
 
 	lo *slog.Logger
 	ko *koanf.Koanf
@@ -33,8 +30,6 @@ var (
 
 func init() {
 	flag.StringVar(&confFlag, "config", "config.toml", "Config file location")
-	flag.StringVar(&migrationsFolderFlag, "migrations", "migrations/", "Migrations folder location")
-	flag.StringVar(&queriesFlag, "queries", "queries.sql", "Queries file location")
 	flag.Parse()
 
 	lo = initLogger()
@@ -44,8 +39,8 @@ func init() {
 }
 
 func main() {
-	var wg sync.WaitGroup
 	ctx, stop := notifyShutdown()
+	defer stop()
 
 	s3Uploader, err := s3.New(s3.S3Opts{
 		Endpoint:        ko.MustString("s3.endpoint"),
@@ -59,49 +54,62 @@ func main() {
 		os.Exit(1)
 	}
 
+	verifyingKey, err := api.LoadVerifyingKey(ko.MustString("auth.public_key"))
+	if err != nil {
+		lo.Error("could not load auth verifying key", "error", err)
+		os.Exit(1)
+	}
+
 	apiServer := api.New(api.APIOpts{
-		EnableMetrics:   ko.Bool("metrics.enable"),
-		ListenAddress:   ko.MustString("api.address"),
-		MaxBodySize:     ko.MustInt64("api.max_body_size") << 20,
-		CORS:            ko.MustStrings("api.origin"),
-		UploadTimeout:   5 * time.Second,
+		EnableMetrics:        ko.Bool("metrics.enable"),
+		ListenAddress:        ko.MustString("api.address"),
+		MaxBodySize:          ko.MustInt64("api.max_body_size") << 20,
+		MaxPixels:            ko.MustInt("image.max_pixels"),
+		NormalizeConcurrency: ko.MustInt("image.normalize_concurrency"),
+		CORS:                 ko.MustStrings("api.origin"),
+		AllowedFolders:       ko.MustStrings("api.allowed_folders"),
+		AllowedWidths:        ko.MustInts("image.allowed_widths"),
+		CDNBaseURL:           ko.MustString("api.cdn_base_url"),
+		UploadTimeout:        ko.MustDuration("api.upload_timeout"),
+		ClockSkew:            ko.MustDuration("auth.clock_skew"),
+		Image: image.Opts{
+			Quality:                ko.MustInt("image.quality"),
+			Method:                 ko.MustInt("image.method"),
+			MateriallySmallerRatio: ko.MustFloat64("image.materially_smaller_ratio"),
+			MinPSNR:                ko.MustFloat64("image.min_psnr"),
+		},
+		VerifyingKey:    verifyingKey,
 		StorageProvider: s3Uploader,
 		Logg:            lo,
 	})
 
-	wg.Add(1)
+	serverErr := make(chan error, 1)
 	go func() {
-		defer wg.Done()
-		if err := apiServer.Start(); err != http.ErrServerClosed {
-			lo.Error("failed to start HTTP server", "err", fmt.Sprintf("%T", err))
+		serverErr <- apiServer.Start()
+	}()
+
+	select {
+	case err := <-serverErr:
+		if !errors.Is(err, http.ErrServerClosed) {
+			lo.Error("failed to start HTTP server", "error", err)
 			os.Exit(1)
 		}
-	}()
-
-	<-ctx.Done()
-	lo.Info("shutdown signal received")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaultGracefulShutdownPeriod)
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		apiServer.Stop(shutdownCtx)
-	}()
-
-	go func() {
-		wg.Wait()
-		stop()
-		cancel()
-		os.Exit(0)
-	}()
-
-	<-shutdownCtx.Done()
-	if errors.Is(shutdownCtx.Err(), context.DeadlineExceeded) {
-		stop()
-		cancel()
-		lo.Error("graceful shutdown period exceeded, forcefully shutting down")
+		return
+	case <-ctx.Done():
+		lo.Info("shutdown signal received")
 	}
-	os.Exit(1)
+
+	// Untrap signals so a second one can still kill a draining process.
+	stop()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), defaultGracefulShutdownPeriod)
+	defer cancel()
+
+	if err := apiServer.Stop(shutdownCtx); err != nil {
+		lo.Error("graceful shutdown period exceeded, forcefully shutting down", "error", err)
+		os.Exit(1)
+	}
+	lo.Info("shutdown complete")
 }
 
 func notifyShutdown() (context.Context, context.CancelFunc) {

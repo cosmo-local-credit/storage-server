@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
+
+	"github.com/labstack/echo/v5"
 )
 
 type (
@@ -15,8 +18,8 @@ type (
 	}
 
 	httpError struct {
-		StatusCode int    `json:"status"`
-		Message    string `json:"message"`
+		statusCode int
+		code       string
 	}
 
 	errorProvider struct {
@@ -28,49 +31,82 @@ var (
 	ErrFormFolderKeyNotFound   = errors.New("form folder key not found")
 	ErrFormFileNameKeyNotFound = errors.New("form file name key not found")
 	ErrNotImageFile            = errors.New("uploaded file is not an image")
+	ErrUnauthorized            = errors.New("unauthorized")
+	ErrInvalidFolder           = errors.New("invalid folder")
+	ErrInvalidName             = errors.New("invalid name")
+	ErrImageTooLarge           = errors.New("image exceeds max pixels")
+	ErrInvalidWidth            = errors.New("invalid width")
 )
 
+// Distinct sentinels, so order does not matter.
+var sentinelErrors = []struct {
+	err    error
+	status int
+	code   string
+}{
+	{ErrUnauthorized, http.StatusUnauthorized, "UNAUTHORIZED"},
+	{ErrFormFolderKeyNotFound, http.StatusBadRequest, "MISSING_FOLDER"},
+	{ErrFormFileNameKeyNotFound, http.StatusBadRequest, "MISSING_NAME"},
+	{ErrInvalidFolder, http.StatusBadRequest, "INVALID_FOLDER"},
+	{ErrInvalidName, http.StatusBadRequest, "INVALID_NAME"},
+	{ErrInvalidWidth, http.StatusBadRequest, "INVALID_WIDTH"},
+	{ErrImageTooLarge, http.StatusBadRequest, "IMAGE_TOO_LARGE"},
+	{ErrNotImageFile, http.StatusBadRequest, "UNSUPPORTED_FILE_EXTENSION"},
+	{http.ErrNotMultipart, http.StatusBadRequest, "NOT_MULTIPART"},
+	{http.ErrMissingFile, http.StatusBadRequest, "MISSING_FILE"},
+	{io.EOF, http.StatusBadRequest, "EOF"},
+	{os.ErrDeadlineExceeded, http.StatusRequestTimeout, "DEADLINE_EXCEEDED"},
+	{context.DeadlineExceeded, http.StatusRequestTimeout, "DEADLINE_EXCEEDED"},
+	{context.Canceled, http.StatusRequestTimeout, "REQUEST_CANCELED"},
+}
+
+// Statuses Echo raises itself; without an entry a router refusal reads as a 500.
+var echoStatusCodes = map[int]string{
+	http.StatusBadRequest:            "BAD_REQUEST",
+	http.StatusNotFound:              "NOT_FOUND",
+	http.StatusMethodNotAllowed:      "METHOD_NOT_ALLOWED",
+	http.StatusRequestEntityTooLarge: "FILE_SIZE_LIMIT_EXCEEDED",
+	http.StatusUnsupportedMediaType:  "UNSUPPORTED_MEDIA_TYPE",
+}
+
 func (e *httpError) HTTPStatusCode() int {
-	return e.StatusCode
+	return e.statusCode
 }
 
 func (e *httpError) Error() string {
-	return e.Message
+	return e.code
 }
 
-func newError(status int, message string) Error {
+func newError(status int, code string) Error {
 	return &httpError{
-		StatusCode: status,
-		Message:    message,
+		statusCode: status,
+		code:       code,
 	}
 }
 
 func (e *errorProvider) from(err error) Error {
-	switch err := err.(type) {
-	case Error:
-		return err
-	case *http.MaxBytesError:
+	var apiErr Error
+	if errors.As(err, &apiErr) {
+		return apiErr
+	}
+
+	for _, s := range sentinelErrors {
+		if errors.Is(err, s.err) {
+			return newError(s.status, s.code)
+		}
+	}
+
+	// Carries the limit, so it is not a sentinel.
+	var maxBytes *http.MaxBytesError
+	if errors.As(err, &maxBytes) {
 		return newError(http.StatusRequestEntityTooLarge, "FILE_SIZE_LIMIT_EXCEEDED")
 	}
 
-	if errors.Is(err, io.EOF) {
-		return newError(http.StatusBadRequest, "EOF")
-	}
-	if errors.Is(err, os.ErrDeadlineExceeded) {
-		return newError(http.StatusRequestTimeout, "DEADLINE_EXCEEDED")
-	}
-	if errors.Is(err, http.ErrNotMultipart) {
-		return newError(http.StatusBadRequest, "NOT_MULTIPART")
-	}
-	if errors.Is(err, http.ErrMissingFile) {
-		return newError(http.StatusBadRequest, "MISSING_FILE")
-	}
-	if errors.Is(err, ErrFormFolderKeyNotFound) {
-		return newError(http.StatusBadRequest, "MISSING_FOLDER")
-	}
-	if errors.Is(err, ErrNotImageFile) {
-		return newError(http.StatusBadRequest, "UNSUPPORTED_FILE_EXTENSION")
-
+	var coder echo.HTTPStatusCoder
+	if errors.As(err, &coder) {
+		if code, ok := echoStatusCodes[coder.StatusCode()]; ok {
+			return newError(coder.StatusCode(), code)
+		}
 	}
 
 	e.logg.Error("internal server error", "error", err)

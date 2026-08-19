@@ -3,8 +3,30 @@ enable = true
 
 [api]
 address = ":5003"
-max_body_size = 5
+max_body_size = 8
 origin = ["https://sarafu.network", "https://preview.sarafu.network", "http://localhost:3000"]
+allowed_folders = ["voucher", "profile"]
+cdn_base_url = "https://content.sarafu.network"
+upload_timeout = "60s"
+
+[image]
+allowed_widths           = [400, 800, 1280]
+quality                  = 82
+method                   = 6
+# 12.5 MP admits a 4032x3024 phone photo. Roughly 4 bytes per pixel in flight, so
+# this and normalize_concurrency together bound memory.
+max_pixels               = 12500000
+materially_smaller_ratio = 0.90
+min_psnr                 = 30
+normalize_concurrency    = 4
+
+[auth]
+# Ed25519 public key matching clc-core's signing key. Never configure its private key.
+public_key = """
+-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAd5osN95MX4qOplzCcXvWggSe79YKbJLJbQWEaL0sRnE=
+-----END PUBLIC KEY-----"""
+clock_skew = "30s"
 
 [s3]
 endpoint = ""

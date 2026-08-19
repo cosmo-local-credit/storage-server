@@ -30,6 +30,9 @@ type (
 
 const bootstrapTimeout = 10 * time.Second
 
+// Keys embed a content digest, so an object never changes under one.
+const immutableCacheControl = "public, max-age=31536000, immutable"
+
 func New(o S3Opts) (storage.Storage, error) {
 	minioClient, err := minio.New(o.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(o.AccessKeyID, o.SecretAccessKey, ""),
@@ -60,7 +63,8 @@ func New(o S3Opts) (storage.Storage, error) {
 
 func (s *S3) Upload(ctx context.Context, objectName string, path string, ioReader io.Reader, objectSize int64, contentType string) error {
 	info, err := s.client.PutObject(ctx, s.bucketName, fmt.Sprintf("%s/%s", path, objectName), ioReader, objectSize, minio.PutObjectOptions{
-		ContentType: contentType,
+		ContentType:  contentType,
+		CacheControl: immutableCacheControl,
 	})
 	if err != nil {
 		return err

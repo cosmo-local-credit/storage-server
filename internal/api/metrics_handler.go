@@ -4,22 +4,21 @@ import (
 	"net/http"
 
 	"github.com/VictoriaMetrics/metrics"
-	"github.com/uptrace/bunrouter"
+	"github.com/labstack/echo/v5"
 )
 
-type metricsHandler struct {
-	enable bool
+// The text exposition format VictoriaMetrics writes.
+const prometheusContentType = "text/plain; version=0.0.4; charset=utf-8"
+
+type metricsHandler struct{}
+
+func newMetricsHandler() *metricsHandler {
+	return &metricsHandler{}
 }
 
-func newMetricshandler(enable bool) *metricsHandler {
-	return &metricsHandler{
-		enable: enable,
-	}
-}
-
-func (m *metricsHandler) metrics(w http.ResponseWriter, _ bunrouter.Request) error {
-	if m.enable {
-		metrics.WritePrometheus(w, true)
-	}
+func (m *metricsHandler) metrics(c *echo.Context) error {
+	c.Response().Header().Set(echo.HeaderContentType, prometheusContentType)
+	c.Response().WriteHeader(http.StatusOK)
+	metrics.WritePrometheus(c.Response(), true)
 	return nil
 }
