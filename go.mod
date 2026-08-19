@@ -4,7 +4,6 @@ go 1.22.3
 
 require (
 	github.com/VictoriaMetrics/metrics v1.33.1
-	github.com/google/uuid v1.6.0
 	github.com/h2non/filetype v1.1.3
 	github.com/kamikazechaser/common v0.2.0
 	github.com/knadh/koanf/parsers/toml v0.1.0
@@ -12,7 +11,7 @@ require (
 	github.com/knadh/koanf/providers/file v0.1.0
 	github.com/knadh/koanf/v2 v2.1.1
 	github.com/minio/minio-go/v7 v7.0.71
-	github.com/rs/cors v1.11.0
+	github.com/rs/cors v1.11.1
 	github.com/uptrace/bunrouter v1.0.21
 	github.com/uptrace/bunrouter/extra/reqlog v1.0.21
 )
@@ -24,6 +23,7 @@ require (
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.0.0-alpha.1 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.17.6 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.6 // indirect
 	github.com/knadh/koanf/maps v0.1.1 // indirect
