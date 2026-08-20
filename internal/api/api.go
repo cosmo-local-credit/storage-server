@@ -92,10 +92,10 @@ func New(o APIOpts) *API {
 		},
 	}))
 	router.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins:     o.CORS,
-		AllowCredentials: true,
-		AllowMethods:     []string{http.MethodGet, http.MethodHead, http.MethodPost},
-		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+		UnsafeAllowOriginFunc: newOriginMatcher(o.CORS),
+		AllowCredentials:      true,
+		AllowMethods:          []string{http.MethodGet, http.MethodHead, http.MethodPost},
+		AllowHeaders:          []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 	}))
 
 	// Grouped by guard: anything added under /v1 is authenticated and body-limited

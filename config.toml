@@ -4,8 +4,19 @@ enable = true
 [api]
 address = ":5003"
 max_body_size = 8
-origin = ["https://sarafu.network", "https://preview.sarafu.network", "http://localhost:3000"]
-allowed_folders = ["voucher", "profile"]
+# A single `*` stands for exactly one DNS label, so one entry covers every branch
+# preview of a Pages project. See newOriginMatcher.
+origin = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "https://app.cosmolocal.credit",
+    "https://admin.cosmolocal.credit",
+    "https://clc-app.pages.dev",
+    "https://*.clc-app.pages.dev",
+    "https://clc-admin.pages.dev",
+    "https://*.clc-admin.pages.dev",
+]
+allowed_folders = ["voucher", "profile", "pool", "report"]
 cdn_base_url = "https://content.sarafu.network"
 upload_timeout = "60s"
 

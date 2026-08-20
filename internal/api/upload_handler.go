@@ -101,10 +101,17 @@ func (u *uploadHandler) upload(c *echo.Context) error {
 		return err
 	}
 
+	// s3 stays for callers written against the original response. The rest is the
+	// normalized output as stored, so a client does not have to decode the result
+	// to know what it got.
 	return c.JSON(http.StatusOK, map[string]any{
 		"ok": true,
 		"payload": map[string]any{
-			"s3": fmt.Sprintf("%s/%s/%s", u.cdnBaseURL, folder, filePath),
+			"s3":          fmt.Sprintf("%s/%s/%s", u.cdnBaseURL, folder, filePath),
+			"width":       result.Width,
+			"height":      result.Height,
+			"byteSize":    len(result.Bytes),
+			"contentType": result.ContentType,
 		},
 	})
 }

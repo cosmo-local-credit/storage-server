@@ -57,6 +57,15 @@ The scheme is case insensitive, so `bearer` also works. `role` and `service` onl
 
 Anything wrong with the token returns `401 UNAUTHORIZED` with no further detail. The reason is recorded in the `storage_auth_total{result,reason}` metric.
 
+### CORS
+
+`api.origin` is matched with one `*` standing for exactly one DNS label, so
+`https://*.clc-admin.pages.dev` admits every branch preview of that project while
+`https://a.b.clc-admin.pages.dev` and the bare apex do not. List the apex
+separately when it needs to be allowed. Echo's own matcher is a literal compare;
+this behaviour comes from `newOriginMatcher` and mirrors clc-core's
+`util.OriginAllowed`.
+
 ### Upload
 
 ```
@@ -86,10 +95,18 @@ curl -X POST https://storage.sarafu.africa/v1/upload \
 {
   "ok": true,
   "payload": {
-    "s3": "https://content.sarafu.network/voucher/bd10fd365101425f8bafeb6adfe8007c_800_a3f91c2e.webp"
+    "s3": "https://content.sarafu.network/voucher/bd10fd365101425f8bafeb6adfe8007c_800_a3f91c2e.webp",
+    "width": 800,
+    "height": 533,
+    "byteSize": 82972,
+    "contentType": "image/webp"
   }
 }
 ```
+
+Everything but `s3` describes the object as stored, not as requested: `width` is the
+actual output width, which is the source's width when that is narrower than the
+requested one. A caller can size a layout from this without decoding the result.
 
 Any error:
 

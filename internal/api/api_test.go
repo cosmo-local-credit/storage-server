@@ -251,6 +251,141 @@ func TestUploadSuccessJSON(t *testing.T) {
 	if !strings.HasSuffix(s3URL, "/"+up.path+"/"+up.name) {
 		t.Fatalf("url %s does not match stored object %s/%s", s3URL, up.path, up.name)
 	}
+
+	// The metadata describes the object as stored, not the request: a 800x500
+	// source asked for 400 comes back 400x250.
+	if got, want := payload["width"], float64(400); got != want {
+		t.Fatalf("width = %v, want %v", got, want)
+	}
+	if got, want := payload["height"], float64(250); got != want {
+		t.Fatalf("height = %v, want %v", got, want)
+	}
+	if got, want := payload["byteSize"], float64(len(up.data)); got != want {
+		t.Fatalf("byteSize = %v, want %v", got, want)
+	}
+	if got, want := payload["contentType"], up.contentType; got != want {
+		t.Fatalf("contentType = %v, want %v", got, want)
+	}
+}
+
+// The two folders the image plan adds. They are configuration, but a typo here is
+// a 400 on every post upload, so the wiring is asserted.
+func TestUploadAcceptsConfiguredFolders(t *testing.T) {
+	for _, folder := range []string{"voucher", "profile", "pool", "report"} {
+		t.Run(folder, func(t *testing.T) {
+			store := &recordingStorage{}
+			env := newTestEnv(t, store, func(o *APIOpts) {
+				o.AllowedFolders = []string{"voucher", "profile", "pool", "report"}
+			})
+			body, ctype := multipartBody(t, map[string]string{
+				"folder": folder,
+				"name":   "bd10fd365101425f8bafeb6adfe8007c",
+				"width":  "400",
+			}, "photo.jpg", photoJPEG(t, 800, 500, 1))
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)
+			req.Header.Set("Content-Type", ctype)
+			req.Header.Set("Authorization", "Bearer "+env.token(t, userClaims("USER")))
+			res := httptest.NewRecorder()
+			env.api.Handler().ServeHTTP(res, req)
+
+			if res.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 body=%s", res.Code, res.Body.String())
+			}
+			if got := store.last().path; got != folder {
+				t.Fatalf("stored under %q, want %q", got, folder)
+			}
+		})
+	}
+}
+
+func TestUploadRejectsUnconfiguredFolder(t *testing.T) {
+	env := newTestEnv(t, &recordingStorage{})
+	body, ctype := multipartBody(t, map[string]string{
+		"folder": "plate",
+		"name":   "bd10fd365101425f8bafeb6adfe8007c",
+		"width":  "400",
+	}, "photo.jpg", photoJPEG(t, 800, 500, 1))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)
+	req.Header.Set("Content-Type", ctype)
+	req.Header.Set("Authorization", "Bearer "+env.token(t, userClaims("USER")))
+	res := httptest.NewRecorder()
+	env.api.Handler().ServeHTTP(res, req)
+
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", res.Code)
+	}
+	if got := decodeJSON(t, res)["code"]; got != "INVALID_FOLDER" {
+		t.Fatalf("code = %v, want INVALID_FOLDER", got)
+	}
+}
+
+func TestOriginMatcher(t *testing.T) {
+	allowed := []string{
+		"http://localhost:3001",
+		"https://admin.cosmolocal.credit",
+		"https://*.clc-admin.pages.dev",
+	}
+	match := newOriginMatcher(allowed)
+
+	for _, tc := range []struct {
+		origin string
+		want   bool
+	}{
+		{"http://localhost:3001", true},
+		{"HTTP://LOCALHOST:3001", true},
+		{"https://admin.cosmolocal.credit", true},
+		{"https://feature-x.clc-admin.pages.dev", true},
+		// One label only: a nested subdomain and the bare apex are separate entries.
+		{"https://a.b.clc-admin.pages.dev", false},
+		{"https://clc-admin.pages.dev", false},
+		{"https://.clc-admin.pages.dev", false},
+		// Suffix confusion: the wildcard must not admit a lookalike registrable domain.
+		{"https://evil-clc-admin.pages.dev", false},
+		{"https://feature-x.clc-admin.pages.dev.evil.test", false},
+		{"http://localhost:3000", false},
+		{"", false},
+	} {
+		origin, ok, err := match(nil, tc.origin)
+		if err != nil {
+			t.Fatalf("%q: unexpected error %v", tc.origin, err)
+		}
+		if ok != tc.want {
+			t.Fatalf("%q allowed = %v, want %v", tc.origin, ok, tc.want)
+		}
+		// A credentialed response cannot carry `*`, so the caller's own origin
+		// must be echoed back verbatim.
+		if ok && origin != tc.origin {
+			t.Fatalf("%q echoed as %q", tc.origin, origin)
+		}
+	}
+}
+
+func TestPreflightAllowsAConfiguredPreviewOrigin(t *testing.T) {
+	env := newTestEnv(t, &recordingStorage{}, func(o *APIOpts) {
+		o.CORS = []string{"https://*.clc-admin.pages.dev"}
+	})
+
+	req := httptest.NewRequest(http.MethodOptions, "/v1/upload", nil)
+	req.Header.Set("Origin", "https://feature-x.clc-admin.pages.dev")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Headers", "authorization,content-type")
+	res := httptest.NewRecorder()
+	env.api.Handler().ServeHTTP(res, req)
+
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 body=%s", res.Code, res.Body.String())
+	}
+	if got := res.Header().Get("Access-Control-Allow-Origin"); got != "https://feature-x.clc-admin.pages.dev" {
+		t.Fatalf("allow-origin = %q", got)
+	}
+	if got := res.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, http.MethodPost) {
+		t.Fatalf("allow-methods = %q, want POST", got)
+	}
+	if got := res.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(strings.ToLower(got), "authorization") {
+		t.Fatalf("allow-headers = %q, want Authorization", got)
+	}
 }
 
 // The shape the API promises: name, actual width, content tag, real extension.
