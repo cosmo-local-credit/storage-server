@@ -210,10 +210,18 @@ See [config.toml](config.toml). Any key can be overridden by an environment vari
 ```bash
 STORAGE_API__MAX_BODY_SIZE=16
 STORAGE_IMAGE__ALLOWED_WIDTHS=400,800,1280
+STORAGE_API__ORIGIN=https://app.example,https://*.preview.example
 STORAGE_S3__SECRET_ACCESS_KEY=...
 ```
 
-`auth.public_key` is the Ed25519 **public** key matching the `clc-core` signing key, in PEM form. The server refuses to start if it is missing, malformed, or a private key.
+A value containing commas — or spaces, if it has no commas — becomes a list, so
+every list key can be set from the environment. A value containing newlines is
+always kept whole, and `\n` escapes are converted first, which is what makes a
+PEM key survive a docker `env_file`. The rules match clc-core's `CORE_*`
+variables, so the service can be configured entirely from an env file with no
+config file mounted.
+
+`auth.public_key` is the Ed25519 **public** key matching the `clc-core` signing key, in PEM form. The server refuses to start if it is missing, malformed, or a private key. It verifies exactly one signer, so an instance serves one clc-core environment.
 
 ## Sample Uploader
 

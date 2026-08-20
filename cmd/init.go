@@ -3,8 +3,8 @@ package main
 import (
 	"log/slog"
 	"os"
-	"strings"
 
+	"github.com/cosmo-local-credit/storage-server/internal/config"
 	"github.com/kamikazechaser/common/logg"
 	"github.com/knadh/koanf/parsers/toml"
 	"github.com/knadh/koanf/providers/env"
@@ -41,10 +41,7 @@ func initConfig() *koanf.Koanf {
 		os.Exit(1)
 	}
 
-	if err := ko.Load(env.Provider("STORAGE_", ".", func(s string) string {
-		return strings.ReplaceAll(strings.ToLower(
-			strings.TrimPrefix(s, "STORAGE_")), "__", ".")
-	}), nil); err != nil {
+	if err := ko.Load(env.ProviderWithValue(config.EnvPrefix, ".", config.EnvOverride), nil); err != nil {
 		lo.Error("could not override config from env vars", "error", err)
 		os.Exit(1)
 	}
