@@ -9,7 +9,7 @@ import (
 	"math"
 
 	"github.com/disintegration/imaging"
-	"github.com/gen2brain/webp"
+	"github.com/deepteams/webp"
 	xwebp "golang.org/x/image/webp"
 )
 
@@ -196,8 +196,8 @@ func webpResult(b []byte, w, h int, lossless bool) Result {
 
 func encodeWebP(img image.Image, opts Opts, lossless, exact bool) ([]byte, error) {
 	var buf bytes.Buffer
-	if err := webp.Encode(&buf, img, webp.Options{
-		Quality:  opts.Quality,
+	if err := webp.Encode(&buf, img, &webp.EncoderOptions{
+		Quality:  float32(opts.Quality),
 		Method:   opts.Method,
 		Lossless: lossless,
 		Exact:    exact,
@@ -213,8 +213,8 @@ func materiallySmaller(candidate, original []byte, ratio float64) bool {
 
 // measurePSNR compares the candidate against the pixels it was made from.
 // Decoding goes through x/image/webp because it returns lossless WebP as RGBA and
-// lossy as the YCbCr the file stores; gen2brain's decoder forces every WebP to
-// 4:2:0 and would inflate the result by tens of decibels.
+// lossy as the YCbCr the file stores. A decoder that forces 4:2:0 on lossless
+// would inflate the result by tens of decibels.
 func measurePSNR(src image.Image, encoded []byte) float64 {
 	got, err := xwebp.Decode(bytes.NewReader(encoded))
 	if err != nil {

@@ -4,8 +4,8 @@ go 1.26.6
 
 require (
 	github.com/VictoriaMetrics/metrics v1.33.1
+	github.com/deepteams/webp v1.2.7
 	github.com/disintegration/imaging v1.6.2
-	github.com/gen2brain/webp v0.6.4
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/kamikazechaser/common v0.2.0
 	github.com/knadh/koanf/parsers/toml v0.1.0
@@ -19,7 +19,6 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/ebitengine/purego v0.10.1 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.0.0-alpha.1 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect

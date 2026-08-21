@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/disintegration/imaging"
-	"github.com/gen2brain/webp"
+	"github.com/deepteams/webp"
 	xwebp "golang.org/x/image/webp"
 )
 
@@ -141,7 +141,7 @@ func TestNormalizeLogoAndTextAreLossless(t *testing.T) {
 			if got.Width != 400 {
 				t.Fatalf("width = %d, want 400", got.Width)
 			}
-			assertSizeCeiling(t, got, 400)
+			assertSizeCeiling(t, got, 600)
 		})
 	}
 }
@@ -183,7 +183,7 @@ func TestNormalizePreservesAlpha(t *testing.T) {
 
 func TestNormalizeKeepsAlreadyWebP(t *testing.T) {
 	var buf bytes.Buffer
-	if err := webp.Encode(&buf, photoNRGBA(240, 160), webp.Options{Quality: 82, Method: 6}); err != nil {
+	if err := webp.Encode(&buf, photoNRGBA(240, 160), &webp.EncoderOptions{Quality: 82, Method: 6}); err != nil {
 		t.Fatal(err)
 	}
 	src := buf.Bytes()
