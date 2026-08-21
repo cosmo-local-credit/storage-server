@@ -131,6 +131,14 @@ Use the returned URL as is. Do not build it yourself, because both the width and
 
 Because the key contains a content hash, re-uploading the same bytes under the same name returns the same URL, and uploading different bytes under the same name returns a new URL instead of replacing the old object. Objects are stored with `Cache-Control: public, max-age=31536000, immutable`.
 
+That is what makes a retry cheap for a caller whose own write failed after the upload succeeded. An offering photo uploaded before the `POST /offerings` that fails can be re-sent under the same upload id and resolves to the same object:
+
+```
+https://content.sarafu.network/offering/9c8f2d1a4b6e47c0a1f3d5e7b9c0d2f4_800_a3f91c2e.webp
+```
+
+`<folder>` carries no relationship. It is the kind of image, never the entity it belongs to, so an offering photo is not keyed by voucher address or by a user-authored name.
+
 ### Output format
 
 One object is stored per upload. There is no variant ladder.
@@ -152,7 +160,7 @@ EXIF orientation is applied to the pixels and the metadata is dropped, so portra
 | Request body | `api.max_body_size` | 8 MiB |
 | Source pixels | `image.max_pixels` | 12,500,000 (fits 4032x3024) |
 | Allowed widths | `image.allowed_widths` | 400, 800, 1280 |
-| Allowed folders | `api.allowed_folders` | `voucher`, `profile` |
+| Allowed folders | `api.allowed_folders` | `voucher`, `profile`, `pool`, `report`, `offering` |
 | Concurrent encodes | `image.normalize_concurrency` | 4 |
 
 Requests over the body limit are rejected before the file is read. Requests over the pixel limit are rejected after reading the header but before decoding.

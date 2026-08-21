@@ -16,7 +16,7 @@ origin = [
     "https://clc-admin.pages.dev",
     "https://*.clc-admin.pages.dev",
 ]
-allowed_folders = ["voucher", "profile", "pool", "report"]
+allowed_folders = ["voucher", "profile", "pool", "report", "offering"]
 cdn_base_url = "https://content.sarafu.network"
 upload_timeout = "60s"
 

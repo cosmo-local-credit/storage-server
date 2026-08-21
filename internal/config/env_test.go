@@ -89,7 +89,7 @@ func TestEnvOverrideRestoresAPemKey(t *testing.T) {
 // values reach the typed getters the service actually calls.
 func TestEnvOverridesReachTypedGetters(t *testing.T) {
 	t.Setenv("STORAGE_API__ORIGIN", "https://a.test,https://b.test")
-	t.Setenv("STORAGE_API__ALLOWED_FOLDERS", "voucher,profile,pool,report")
+	t.Setenv("STORAGE_API__ALLOWED_FOLDERS", "voucher,profile,pool,report,offering")
 	t.Setenv("STORAGE_IMAGE__ALLOWED_WIDTHS", "400,800,1280")
 	t.Setenv("STORAGE_API__MAX_BODY_SIZE", "16")
 	t.Setenv("STORAGE_METRICS__ENABLE", "false")
@@ -102,8 +102,8 @@ func TestEnvOverridesReachTypedGetters(t *testing.T) {
 	if got := ko.MustStrings("api.origin"); len(got) != 2 {
 		t.Fatalf("api.origin = %#v, want two entries", got)
 	}
-	if got := ko.MustStrings("api.allowed_folders"); len(got) != 4 {
-		t.Fatalf("api.allowed_folders = %#v, want four entries", got)
+	if got := ko.MustStrings("api.allowed_folders"); len(got) != 5 {
+		t.Fatalf("api.allowed_folders = %#v, want five entries", got)
 	}
 	if got := ko.MustInts("image.allowed_widths"); !reflect.DeepEqual(got, []int{400, 800, 1280}) {
 		t.Fatalf("image.allowed_widths = %#v", got)

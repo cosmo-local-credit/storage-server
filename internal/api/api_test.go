@@ -268,14 +268,14 @@ func TestUploadSuccessJSON(t *testing.T) {
 	}
 }
 
-// The two folders the image plan adds. They are configuration, but a typo here is
-// a 400 on every post upload, so the wiring is asserted.
+// Every folder the checked-in config allows. They are configuration, but a typo
+// here is a 400 on every post upload, so the wiring is asserted.
 func TestUploadAcceptsConfiguredFolders(t *testing.T) {
-	for _, folder := range []string{"voucher", "profile", "pool", "report"} {
+	for _, folder := range []string{"voucher", "profile", "pool", "report", "offering"} {
 		t.Run(folder, func(t *testing.T) {
 			store := &recordingStorage{}
 			env := newTestEnv(t, store, func(o *APIOpts) {
-				o.AllowedFolders = []string{"voucher", "profile", "pool", "report"}
+				o.AllowedFolders = []string{"voucher", "profile", "pool", "report", "offering"}
 			})
 			body, ctype := multipartBody(t, map[string]string{
 				"folder": folder,
@@ -296,6 +296,61 @@ func TestUploadAcceptsConfiguredFolders(t *testing.T) {
 				t.Fatalf("stored under %q, want %q", got, folder)
 			}
 		})
+	}
+}
+
+// Re-sending an offering photo after a failed clc-core write must not create a
+// second object. The key is the caller's upload id plus the stored width and a
+// hash of the normalized bytes, so an identical retry is idempotent by
+// construction -- which is what lets a form keep the URL it already has instead
+// of uploading the same photo twice.
+func TestUploadOfferingRetryReusesObjectKey(t *testing.T) {
+	store := &recordingStorage{}
+	env := newTestEnv(t, store, func(o *APIOpts) {
+		o.AllowedFolders = []string{"voucher", "profile", "pool", "report", "offering"}
+	})
+	source := photoJPEG(t, 1200, 900, 7)
+
+	post := func() (string, string) {
+		t.Helper()
+		body, ctype := multipartBody(t, map[string]string{
+			"folder": "offering",
+			"name":   "9c8f2d1a4b6e47c0a1f3d5e7b9c0d2f4",
+			"width":  "800",
+		}, "product.jpg", source)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/upload", body)
+		req.Header.Set("Content-Type", ctype)
+		req.Header.Set("Authorization", "Bearer "+env.token(t, userClaims("USER")))
+		res := httptest.NewRecorder()
+		env.api.Handler().ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 body=%s", res.Code, res.Body.String())
+		}
+		payload, ok := decodeJSON(t, res)["payload"].(map[string]any)
+		if !ok {
+			t.Fatalf("payload missing from %s", res.Body.String())
+		}
+		url, _ := payload["s3"].(string)
+		return store.last().name, url
+	}
+
+	firstKey, firstURL := post()
+	secondKey, secondURL := post()
+
+	if firstKey != secondKey {
+		t.Fatalf("retry stored %q, want the first key %q", secondKey, firstKey)
+	}
+	if firstURL != secondURL {
+		t.Fatalf("retry returned %q, want %q", secondURL, firstURL)
+	}
+	if got := store.last().path; got != "offering" {
+		t.Fatalf("stored under %q, want %q", got, "offering")
+	}
+	// The width is 800 and not the 1200 source, so the offering policy's width
+	// really reached the encoder rather than the file passing through.
+	if !strings.Contains(firstKey, "_800_") {
+		t.Fatalf("key = %q, want the stored width 800", firstKey)
 	}
 }
 
