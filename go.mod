@@ -3,7 +3,7 @@ module github.com/cosmo-local-credit/storage-server
 go 1.26.6
 
 require (
-	github.com/VictoriaMetrics/metrics v1.33.1
+	github.com/VictoriaMetrics/metrics v1.44.0
 	github.com/deepteams/webp v1.2.7
 	github.com/disintegration/imaging v1.6.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
