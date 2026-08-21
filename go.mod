@@ -10,7 +10,7 @@ require (
 	github.com/kamikazechaser/common v0.2.0
 	github.com/knadh/koanf/parsers/toml v0.1.0
 	github.com/knadh/koanf/providers/env v0.1.0
-	github.com/knadh/koanf/providers/file v0.1.0
+	github.com/knadh/koanf/providers/file v1.2.1
 	github.com/knadh/koanf/v2 v2.1.1
 	github.com/labstack/echo/v5 v5.3.1
 	github.com/minio/minio-go/v7 v7.0.71
@@ -19,7 +19,7 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/fsnotify/fsnotify v1.6.0 // indirect
+	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.0.0-alpha.1 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
