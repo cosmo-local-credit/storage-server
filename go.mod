@@ -14,7 +14,7 @@ require (
 	github.com/knadh/koanf/v2 v2.1.1
 	github.com/labstack/echo/v5 v5.3.1
 	github.com/minio/minio-go/v7 v7.0.71
-	golang.org/x/image v0.45.0
+	golang.org/x/image v0.46.0
 )
 
 require (
@@ -36,8 +36,8 @@ require (
 	github.com/valyala/histogram v1.2.0 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 )
