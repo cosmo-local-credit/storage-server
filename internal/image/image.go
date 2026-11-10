@@ -8,8 +8,8 @@ import (
 	_ "image/png"
 	"math"
 
-	"github.com/disintegration/imaging"
 	"github.com/deepteams/webp"
+	"github.com/disintegration/imaging"
 	xwebp "golang.org/x/image/webp"
 )
 
@@ -37,12 +37,19 @@ type (
 		MateriallySmallerRatio float64
 		MinPSNR                float64
 	}
+
+	// Aspect is a width:height ratio. The zero value means the source's own.
+	Aspect struct {
+		W int
+		H int
+	}
 )
 
 var (
 	ErrUnsupported   = errors.New("unsupported image type")
 	ErrTooManyPixels = errors.New("image exceeds max pixels")
 	ErrInvalidWidth  = errors.New("invalid requested width")
+	ErrInvalidAspect = errors.New("invalid aspect ratio")
 )
 
 // extensions are the accepted formats, keyed by the name the registered decoders
@@ -83,6 +90,19 @@ func Inspect(src []byte, maxPixels int) (Info, error) {
 // Normalize decodes src once and produces one output at
 // min(sourceWidth, requestedWidth), preserving the aspect ratio.
 func Normalize(src []byte, info Info, requestedWidth int, opts Opts) (Result, error) {
+	return normalizeFrame(src, info, requestedWidth, Aspect{}, opts)
+}
+
+// NormalizeCropped is Normalize after a centre crop to aspect. The crop runs on
+// the upright frame, so a quarter-turn EXIF photo is cropped as the viewer sees it.
+func NormalizeCropped(src []byte, info Info, requestedWidth int, aspect Aspect, opts Opts) (Result, error) {
+	if aspect.W <= 0 || aspect.H <= 0 {
+		return Result{}, ErrInvalidAspect
+	}
+	return normalizeFrame(src, info, requestedWidth, aspect, opts)
+}
+
+func normalizeFrame(src []byte, info Info, requestedWidth int, aspect Aspect, opts Opts) (Result, error) {
 	if requestedWidth <= 0 {
 		return Result{}, ErrInvalidWidth
 	}
@@ -97,15 +117,31 @@ func Normalize(src []byte, info Info, requestedWidth int, opts Opts) (Result, er
 	}
 
 	srcW, srcH := img.Bounds().Dx(), img.Bounds().Dy()
-	outW := min(srcW, requestedWidth)
-	if outW < srcW {
-		img = imaging.Resize(img, outW, 0, imaging.Lanczos)
+	cropped := false
+	if aspect != (Aspect{}) {
+		if r := CentreRect(srcW, srcH, aspect); r.Dx() != srcW || r.Dy() != srcH {
+			img = imaging.Crop(img, r.Add(img.Bounds().Min))
+			cropped = true
+		}
+	}
+
+	cropW := img.Bounds().Dx()
+	outW := min(cropW, requestedWidth)
+	if outW < cropW {
+		// The height is derived from the ratio rather than the cropped frame, so a
+		// resized crop lands on the exact aspect instead of inheriting its rounding.
+		outH := 0
+		if aspect != (Aspect{}) {
+			outH = max(1, roundDiv(outW*aspect.H, aspect.W))
+		}
+		img = imaging.Resize(img, outW, outH, imaging.Lanczos)
 	}
 	outH := img.Bounds().Dy()
 
 	// A quarter-turn EXIF rotation leaves the stored bytes describing a different
-	// frame than the caller will see, so those are re-encoded rather than kept.
-	retainable := outW == srcW && srcW == info.Width && srcH == info.Height
+	// frame than the caller will see, so those are re-encoded rather than kept. A
+	// crop does the same.
+	retainable := !cropped && outW == srcW && srcW == info.Width && srcH == info.Height
 
 	if info.Format == "webp" && retainable {
 		return retained(src, info.Format, srcW, srcH), nil
@@ -119,6 +155,29 @@ func Normalize(src []byte, info Info, requestedWidth int, opts Opts) (Result, er
 		return retained(src, info.Format, srcW, srcH), nil
 	}
 	return candidate, nil
+}
+
+// CentreRect is the largest w:h-proportioned rectangle centred in a w x h frame,
+// relative to its origin. The trimmed side is rounded rather than floored so the
+// crop is the nearest integer frame to the ratio; an odd remainder goes to the
+// far edge.
+func CentreRect(w, h int, a Aspect) image.Rectangle {
+	if w <= 0 || h <= 0 || a.W <= 0 || a.H <= 0 {
+		return image.Rect(0, 0, max(w, 0), max(h, 0))
+	}
+	cw, ch := w, h
+	if w*a.H > h*a.W {
+		cw = min(w, max(1, roundDiv(h*a.W, a.H)))
+	} else {
+		ch = min(h, max(1, roundDiv(w*a.H, a.W)))
+	}
+	x, y := (w-cw)/2, (h-ch)/2
+	return image.Rect(x, y, x+cw, y+ch)
+}
+
+// roundDiv is n/d rounded half up, for positive operands.
+func roundDiv(n, d int) int {
+	return (2*n + d) / (2 * d)
 }
 
 // encode produces the one delivery encoding for img.

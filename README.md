@@ -117,6 +117,58 @@ Any error:
 }
 ```
 
+### Import
+
+```
+POST /v1/import
+Content-Type: application/json
+```
+
+Fetches an image from an allowlisted host and stores it exactly as `/v1/upload`
+would, after a centre crop to `aspect`. Same authentication, CORS and body limit.
+
+```json
+{
+  "url": "https://images.example.org/v/123.jpg",
+  "folder": "voucher",
+  "uploadId": "bd10fd365101425f8bafeb6adfe8007c",
+  "width": 400,
+  "aspect": "1:1"
+}
+```
+
+| Field | Type | Rule |
+|---|---|---|
+| `url` | string | `https`, no userinfo, host on `import.allowed_hosts` |
+| `folder` | string | One of `api.allowed_folders` |
+| `uploadId` | string | `^[A-Za-z0-9_-]{1,64}$` |
+| `width` | number | One of `image.allowed_widths` |
+| `aspect` | string | `1:1` or `16:9` |
+
+The response is the `/v1/upload` response, and the object key has the same form,
+so importing the same source again under the same `uploadId` returns the same URL.
+
+The fetch:
+
+* Hosts match `import.allowed_hosts` exactly, no wildcards. Both sides are
+  lower-cased, converted to IDNA ASCII and stripped of a trailing dot. An empty
+  list turns import off.
+* Every address the connection is made to is checked at the socket, after
+  resolution, so a host that resolves or rebinds to a non-public address is
+  refused: loopback, private (RFC 1918, `fc00::/7`), `100.64.0.0/10`, link-local,
+  `0.0.0.0/8`, multicast, reserved and broadcast. IPv4-mapped and `64:ff9b::/96`
+  NAT64 addresses are judged as the IPv4 address they carry; `64:ff9b:1::/48` is
+  refused outright.
+* Redirects are not followed. Environment proxies are ignored. Certificates are
+  verified against the hostname.
+* The body is capped at `api.max_body_size`, and the whole fetch at
+  `import.fetch_timeout`.
+* The type is sniffed from the bytes; the response's `Content-Type` is ignored.
+  Only JPEG, PNG and WebP are accepted, under `image.max_pixels`.
+
+Calls are limited per authenticated identity (`userId`, or the service token's
+`publicKey`) to `import.rate_per_minute`, which is also the burst.
+
 ### Object keys
 
 ```
@@ -162,6 +214,9 @@ EXIF orientation is applied to the pixels and the metadata is dropped, so portra
 | Allowed widths | `image.allowed_widths` | 400, 800, 1280 |
 | Allowed folders | `api.allowed_folders` | `voucher`, `profile`, `pool`, `report`, `offering` |
 | Concurrent encodes | `image.normalize_concurrency` | 4 |
+| Import hosts | `import.allowed_hosts` | `sarafu.network`; empty turns import off |
+| Import fetch time | `import.fetch_timeout` | 15s |
+| Imports per identity | `import.rate_per_minute` | 30, `0` disables the limit |
 
 Requests over the body limit are rejected before the file is read. Requests over the pixel limit are rejected after reading the header but before decoding.
 
@@ -179,7 +234,11 @@ Requests over the body limit are rejected before the file is read. Requests over
 | 400 | `UNSUPPORTED_FILE_EXTENSION` | Not a readable JPEG, PNG or WebP |
 | 400 | `IMAGE_TOO_LARGE` | Over `image.max_pixels` |
 | 400 | `EOF` | Body ended early |
-| 400 | `BAD_REQUEST` | Malformed request |
+| 400 | `BAD_REQUEST` | Malformed request, or `/v1/import` body that is not JSON |
+| 400 | `INVALID_URL` | Import `url` absent, unparseable, without a host, or carrying userinfo |
+| 400 | `INVALID_ASPECT` | Import `aspect` absent or not `1:1` / `16:9` |
+| 400 | `IMPORT_HOST_NOT_ALLOWED` | Import off, not `https`, host not listed, or it resolved to a refused address |
+| 400 | `IMPORT_CONTENT_REJECTED` | Fetched bytes are not a readable JPEG, PNG or WebP, or over `image.max_pixels` |
 | 401 | `UNAUTHORIZED` | Missing, malformed, expired or badly signed token |
 | 404 | `NOT_FOUND` | Unknown route, or a method the route does not accept |
 | 405 | `METHOD_NOT_ALLOWED` | Method not routed |
@@ -187,7 +246,12 @@ Requests over the body limit are rejected before the file is read. Requests over
 | 408 | `REQUEST_CANCELED` | Client disconnected |
 | 413 | `FILE_SIZE_LIMIT_EXCEEDED` | Over `api.max_body_size` |
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | Unsupported content type |
+| 429 | `RATE_LIMITED` | Over `import.rate_per_minute`; `Retry-After` gives the wait in seconds |
 | 500 | `INTERNAL_SERVER_ERROR` | Everything else |
+| 502 | `IMPORT_FETCH_FAILED` | Import could not connect, timed out, got a non-2xx or 3xx, or the body was over the cap |
+
+On `/v1/import`, `INVALID_FOLDER`, `INVALID_NAME` (`uploadId`) and `INVALID_WIDTH`
+also cover a missing field.
 
 ### CORS
 
@@ -210,6 +274,9 @@ Prometheus text format, no authentication, served only when `metrics.enable` is 
 | `storage_upload_width_total` | `requested`, `actual` |
 | `storage_upload_format_total` | `source`, `output`, `lossless` |
 | `storage_auth_total` | `result`, plus `reason` on rejections |
+| `storage_import_total` | `result` |
+
+Imports are normalized by the same pipeline, so the upload and normalize metrics count them too.
 
 ### Configuration
 
@@ -220,6 +287,9 @@ STORAGE_API__MAX_BODY_SIZE=16
 STORAGE_IMAGE__ALLOWED_WIDTHS=400,800,1280
 STORAGE_API__ORIGIN=https://app.example,https://*.preview.example
 STORAGE_S3__SECRET_ACCESS_KEY=...
+STORAGE_IMPORT__ALLOWED_HOSTS=images.example.org,cdn.example.net
+STORAGE_IMPORT__FETCH_TIMEOUT=15s
+STORAGE_IMPORT__RATE_PER_MINUTE=30
 ```
 
 A value containing commas — or spaces, if it has no commas — becomes a list, so

@@ -36,6 +36,12 @@ var (
 	ErrInvalidName             = errors.New("invalid name")
 	ErrImageTooLarge           = errors.New("image exceeds max pixels")
 	ErrInvalidWidth            = errors.New("invalid width")
+	ErrInvalidURL              = errors.New("invalid url")
+	ErrInvalidAspect           = errors.New("invalid aspect")
+	ErrImportHostNotAllowed    = errors.New("import host not allowed")
+	ErrImportFetchFailed       = errors.New("import fetch failed")
+	ErrImportContentRejected   = errors.New("import content rejected")
+	ErrRateLimited             = errors.New("rate limited")
 )
 
 // Distinct sentinels, so order does not matter.
@@ -52,6 +58,12 @@ var sentinelErrors = []struct {
 	{ErrInvalidWidth, http.StatusBadRequest, "INVALID_WIDTH"},
 	{ErrImageTooLarge, http.StatusBadRequest, "IMAGE_TOO_LARGE"},
 	{ErrNotImageFile, http.StatusBadRequest, "UNSUPPORTED_FILE_EXTENSION"},
+	{ErrInvalidURL, http.StatusBadRequest, "INVALID_URL"},
+	{ErrInvalidAspect, http.StatusBadRequest, "INVALID_ASPECT"},
+	{ErrImportHostNotAllowed, http.StatusBadRequest, "IMPORT_HOST_NOT_ALLOWED"},
+	{ErrImportFetchFailed, http.StatusBadGateway, "IMPORT_FETCH_FAILED"},
+	{ErrImportContentRejected, http.StatusBadRequest, "IMPORT_CONTENT_REJECTED"},
+	{ErrRateLimited, http.StatusTooManyRequests, "RATE_LIMITED"},
 	{http.ErrNotMultipart, http.StatusBadRequest, "NOT_MULTIPART"},
 	{http.ErrMissingFile, http.StatusBadRequest, "MISSING_FILE"},
 	{io.EOF, http.StatusBadRequest, "EOF"},

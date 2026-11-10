@@ -7,9 +7,12 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cosmo-local-credit/storage-server/internal/api"
+	"github.com/knadh/koanf/parsers/toml"
 	"github.com/knadh/koanf/providers/env"
+	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 )
 
@@ -113,5 +116,61 @@ func TestEnvOverridesReachTypedGetters(t *testing.T) {
 	}
 	if ko.Bool("metrics.enable") {
 		t.Fatal("metrics.enable = true, want false")
+	}
+}
+
+// import.allowed_hosts is the one list where empty is the safe default and a
+// single entry is the common case, so both have to survive the env path.
+func TestImportAllowedHostsFromEnv(t *testing.T) {
+	for name, tc := range map[string]struct {
+		value string
+		want  []string
+	}{
+		"comma list":   {"images.example.org,cdn.example.net", []string{"images.example.org", "cdn.example.net"}},
+		"space list":   {"images.example.org cdn.example.net", []string{"images.example.org", "cdn.example.net"}},
+		"single entry": {"images.example.org", []string{"images.example.org"}},
+		"empty":        {"", []string{}},
+		"stray commas": {"images.example.org,,", []string{"images.example.org"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("STORAGE_IMPORT__ALLOWED_HOSTS", tc.value)
+			t.Setenv("STORAGE_IMPORT__FETCH_TIMEOUT", "10s")
+			t.Setenv("STORAGE_IMPORT__RATE_PER_MINUTE", "12")
+
+			ko := koanf.New(".")
+			if err := ko.Load(file.Provider("../../config.toml"), toml.Parser()); err != nil {
+				t.Fatal(err)
+			}
+			if err := ko.Load(env.ProviderWithValue(EnvPrefix, ".", EnvOverride), nil); err != nil {
+				t.Fatal(err)
+			}
+
+			if got := Strings(ko, "import.allowed_hosts"); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("import.allowed_hosts = %#v, want %#v", got, tc.want)
+			}
+			if got := ko.MustDuration("import.fetch_timeout"); got != 10*time.Second {
+				t.Fatalf("import.fetch_timeout = %v, want 10s", got)
+			}
+			if got := ko.Int("import.rate_per_minute"); got != 12 {
+				t.Fatalf("import.rate_per_minute = %d, want 12", got)
+			}
+		})
+	}
+}
+
+// The checked-in config allows exactly the first migration's source.
+func TestImportDefaultHosts(t *testing.T) {
+	ko := koanf.New(".")
+	if err := ko.Load(file.Provider("../../config.toml"), toml.Parser()); err != nil {
+		t.Fatal(err)
+	}
+	if got := Strings(ko, "import.allowed_hosts"); !reflect.DeepEqual(got, []string{"sarafu.network"}) {
+		t.Fatalf("import.allowed_hosts = %#v, want [sarafu.network]", got)
+	}
+	if got := ko.MustDuration("import.fetch_timeout"); got <= 0 {
+		t.Fatalf("import.fetch_timeout = %v", got)
+	}
+	if got := ko.Int("import.rate_per_minute"); got <= 0 {
+		t.Fatalf("import.rate_per_minute = %d", got)
 	}
 }

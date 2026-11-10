@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cosmo-local-credit/storage-server/internal/api"
+	"github.com/cosmo-local-credit/storage-server/internal/config"
 	"github.com/cosmo-local-credit/storage-server/internal/image"
 	"github.com/cosmo-local-credit/storage-server/internal/s3"
 	"github.com/knadh/koanf/v2"
@@ -60,6 +61,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	importHosts, err := api.NormalizeHosts(config.Strings(ko, "import.allowed_hosts"))
+	if err != nil {
+		lo.Error("could not load import allowed hosts", "error", err)
+		os.Exit(1)
+	}
+
 	apiServer := api.New(api.APIOpts{
 		EnableMetrics:        ko.Bool("metrics.enable"),
 		ListenAddress:        ko.MustString("api.address"),
@@ -77,6 +84,11 @@ func main() {
 			Method:                 ko.MustInt("image.method"),
 			MateriallySmallerRatio: ko.MustFloat64("image.materially_smaller_ratio"),
 			MinPSNR:                ko.MustFloat64("image.min_psnr"),
+		},
+		Import: api.ImportOpts{
+			AllowedHosts:  importHosts,
+			FetchTimeout:  ko.MustDuration("import.fetch_timeout"),
+			RatePerMinute: ko.Int("import.rate_per_minute"),
 		},
 		VerifyingKey:    verifyingKey,
 		StorageProvider: s3Uploader,

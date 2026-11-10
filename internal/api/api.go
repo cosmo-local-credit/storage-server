@@ -27,6 +27,7 @@ type (
 		UploadTimeout        time.Duration
 		ClockSkew            time.Duration
 		Image                image.Opts
+		Import               ImportOpts
 		VerifyingKey         ed25519.PublicKey
 		StorageProvider      storage.Storage
 		Logg                 *slog.Logger
@@ -115,8 +116,13 @@ func New(o APIOpts) *API {
 		sem:            make(chan struct{}, max(o.NormalizeConcurrency, 1)),
 	}
 
+	// The fetched body is capped at the upload limit, so an import can never store
+	// what an upload could not.
+	importHandler := newImportHandler(uploadHandler, o.Import, o.MaxBodySize)
+
 	v1 := router.Group(apiVersion, middleware.BodyLimit(o.MaxBodySize), api.authMiddleware())
 	v1.POST("/upload", uploadHandler.upload)
+	v1.POST("/import", importHandler.importImage)
 
 	api.server = &http.Server{
 		Addr:         o.ListenAddress,

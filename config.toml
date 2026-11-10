@@ -31,6 +31,16 @@ materially_smaller_ratio = 0.90
 min_psnr                 = 30
 normalize_concurrency    = 4
 
+[import]
+# Hosts /v1/import may fetch from, matched exactly after lower-casing, IDNA and
+# trailing-dot normalization. No wildcards. Empty turns import off. Staging and
+# prod both import from Sarafu Network for the first migration.
+allowed_hosts   = ["sarafu.network"]
+# Covers connect, TLS, headers and body.
+fetch_timeout   = "15s"
+# Per authenticated identity, refilled continuously; also the burst. 0 disables.
+rate_per_minute = 30
+
 [auth]
 # Ed25519 public key matching clc-core's signing key. Never configure its private key.
 public_key = """
