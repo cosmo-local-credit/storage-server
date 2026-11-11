@@ -7,7 +7,7 @@ require (
 	github.com/deepteams/webp v1.2.7
 	github.com/disintegration/imaging v1.6.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/kamikazechaser/common v0.2.0
+	github.com/kamikazechaser/common v1.0.0
 	github.com/knadh/koanf/parsers/toml v0.1.0
 	github.com/knadh/koanf/providers/env v0.1.0
 	github.com/knadh/koanf/providers/file v0.1.0
