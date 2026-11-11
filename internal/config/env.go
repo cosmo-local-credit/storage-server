@@ -3,7 +3,11 @@
 // main calls flag.Parse in its init, which a test binary cannot survive.
 package config
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/knadh/koanf/v2"
+)
 
 // EnvPrefix is the prefix every configuration variable carries.
 const EnvPrefix = "STORAGE_"
@@ -55,4 +59,27 @@ func splitList(value, sep string) []any {
 		list = append(list, part)
 	}
 	return list
+}
+
+// Strings reads a list key that may legitimately be empty or hold one entry.
+//
+// EnvOverride leaves a single value scalar, and koanf's Strings answers a scalar
+// with an empty list, so one host set from the environment would silently read
+// as none. Blank entries are dropped, so an empty variable means an empty list
+// rather than one empty-string entry.
+func Strings(ko *koanf.Koanf, path string) []string {
+	var raw []string
+	if s, ok := ko.Get(path).(string); ok {
+		raw = strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' })
+	} else {
+		raw = ko.Strings(path)
+	}
+
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }

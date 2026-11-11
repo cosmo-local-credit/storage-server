@@ -84,10 +84,19 @@ func (u *uploadHandler) upload(c *echo.Context) error {
 		return imageError(err)
 	}
 
-	result, err := u.normalize(ctx, src, info, requestedWidth)
+	result, err := u.normalize(ctx, src, info, requestedWidth, img.Aspect{})
 	if err != nil {
 		return imageError(err)
 	}
+
+	return u.store(c, folder, fileName, result)
+}
+
+// store writes result under its content-addressed key and answers with the
+// object as stored. /import shares it, so both endpoints key and describe their
+// output identically.
+func (u *uploadHandler) store(c *echo.Context, folder, fileName string, result img.Result) error {
+	ctx := c.Request().Context()
 
 	filePath := fmt.Sprintf("%s_%d_%s.%s", fileName, result.Width, contentTag(result.Bytes), result.Extension)
 	if err := u.storage.Upload(
@@ -118,7 +127,8 @@ func (u *uploadHandler) upload(c *echo.Context) error {
 
 // normalize holds a concurrency slot for the encode. img.Normalize allocates in
 // proportion to the source's pixel count, so the gate bounds memory, not CPU.
-func (u *uploadHandler) normalize(ctx context.Context, src []byte, info img.Info, width int) (img.Result, error) {
+// The zero aspect keeps the source's frame.
+func (u *uploadHandler) normalize(ctx context.Context, src []byte, info img.Info, width int, aspect img.Aspect) (img.Result, error) {
 	select {
 	case u.sem <- struct{}{}:
 	case <-ctx.Done():
@@ -127,7 +137,15 @@ func (u *uploadHandler) normalize(ctx context.Context, src []byte, info img.Info
 	defer func() { <-u.sem }()
 
 	start := time.Now()
-	result, err := img.Normalize(src, info, width, u.imageOpts)
+	var (
+		result img.Result
+		err    error
+	)
+	if aspect == (img.Aspect{}) {
+		result, err = img.Normalize(src, info, width, u.imageOpts)
+	} else {
+		result, err = img.NormalizeCropped(src, info, width, aspect, u.imageOpts)
+	}
 	if err != nil {
 		return img.Result{}, err
 	}

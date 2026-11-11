@@ -913,7 +913,7 @@ func TestNormalizeGivesUpWhenRequestIsAbandoned(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := u.normalize(ctx, nil, img.Info{Format: "jpg"}, 400)
+		_, err := u.normalize(ctx, nil, img.Info{Format: "jpg"}, 400, img.Aspect{})
 		done <- err
 	}()
 
@@ -930,7 +930,7 @@ func TestNormalizeGivesUpWhenRequestIsAbandoned(t *testing.T) {
 func TestNormalizeReleasesSlotOnError(t *testing.T) {
 	u := &uploadHandler{sem: make(chan struct{}, 1), imageOpts: img.DefaultOpts()}
 
-	if _, err := u.normalize(context.Background(), []byte("not an image"), img.Info{Format: "jpg"}, 400); err == nil {
+	if _, err := u.normalize(context.Background(), []byte("not an image"), img.Info{Format: "jpg"}, 400, img.Aspect{}); err == nil {
 		t.Fatal("want an error from a non-image source")
 	}
 

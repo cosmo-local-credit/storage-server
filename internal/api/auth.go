@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/VictoriaMetrics/metrics"
@@ -53,27 +54,42 @@ func (c tokenClaims) hasIdentity() bool {
 	return c.UserID != 0 && c.EthereumAddress != "" && c.Role != ""
 }
 
+// identity names the token's subject, so per-caller limits follow the account
+// rather than the token: a refreshed token is the same caller.
+func (c tokenClaims) identity() string {
+	if c.Service {
+		return "service:" + c.PublicKey
+	}
+	return "user:" + strconv.FormatUint(c.UserID, 10)
+}
+
+// identityKey holds the authenticated subject on the echo context.
+const identityKey = "storage.identity"
+
 func (a *API) authMiddleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			if err := a.authenticate(c.Request().Header.Get(echo.HeaderAuthorization)); err != nil {
+			identity, err := a.authenticate(c.Request().Header.Get(echo.HeaderAuthorization))
+			if err != nil {
 				return err
 			}
+			c.Set(identityKey, identity)
 			return next(c)
 		}
 	}
 }
 
-// authenticate accepts any current clc-core user or service token. Failures
-// collapse to one bare error so nothing about the token reaches the client; the
-// reason goes to a metric label rather than the log, which would carry the token.
-func (a *API) authenticate(header string) error {
+// authenticate accepts any current clc-core user or service token and returns
+// its subject. Failures collapse to one bare error so nothing about the token
+// reaches the client; the reason goes to a metric label rather than the log,
+// which would carry the token.
+func (a *API) authenticate(header string) (string, error) {
 	if len(header) < len(bearerPrefix) || !strings.EqualFold(header[:len(bearerPrefix)], bearerPrefix) {
-		return authFailure("malformed_header")
+		return "", authFailure("malformed_header")
 	}
 	tokenStr := header[len(bearerPrefix):]
 	if tokenStr == "" {
-		return authFailure("malformed_header")
+		return "", authFailure("malformed_header")
 	}
 
 	claims := &tokenClaims{}
@@ -86,19 +102,19 @@ func (a *API) authenticate(header string) error {
 		jwt.WithIssuedAt(),
 		jwt.WithLeeway(a.clockSkew),
 	); err != nil {
-		return authFailure(failureReason(err))
+		return "", authFailure(failureReason(err))
 	}
 
 	// WithIssuedAt only validates iat when present, so require it.
 	if claims.IssuedAt == nil {
-		return authFailure("missing_iat")
+		return "", authFailure("missing_iat")
 	}
 	if !claims.hasIdentity() {
-		return authFailure("unknown_identity")
+		return "", authFailure("unknown_identity")
 	}
 
 	metrics.GetOrCreateCounter(`storage_auth_total{result="accepted"}`).Inc()
-	return nil
+	return claims.identity(), nil
 }
 
 func authFailure(reason string) error {

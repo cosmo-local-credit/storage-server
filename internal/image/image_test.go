@@ -12,8 +12,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/disintegration/imaging"
 	"github.com/deepteams/webp"
+	"github.com/disintegration/imaging"
 	xwebp "golang.org/x/image/webp"
 )
 
